@@ -51,7 +51,6 @@ INLINE_STM32 uint32_t UART_baudrate_calculate(int pclk, int desired_rate, int ov
     const uint32_t fraction = ((div_sampling - mantissa * 100) * 16 + 50) / 100;
 
     return (mantissa << 4) | (fraction & 0x0F);
-#endif
 #if UART_EDU
     // if (over8 == 0):
     return (pclk + desired_rate / 2) / desired_rate;
