@@ -25,7 +25,7 @@
 #include <stdio.h>
 
 BOARD_SETUP void setup(void) {
-	clock168Mhz();
+	//clock168Mhz();
 	UART_setup();
 };
 
