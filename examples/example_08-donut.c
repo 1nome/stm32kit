@@ -2,8 +2,8 @@
   ******************************************************************************
   * @file     example_08-donut.c
   * @author   Adam Wiszczor, a1k0n
-  * @version  1.0
-  * @date     26-February-2024 [v1.0]
+  * @version  1.2
+  * @date     26-February-2024 [v1.2]
   * @brief    Vykresluje donut pres UART, treba nastavit vyssi frekvenci jadra i uartu pro spravny efekt
   *
   * !!! PROZATIM FUNKCNI JEN PRO F407 !!!
@@ -42,7 +42,7 @@ float sini,
       cosB,
       sinB,
       t, mess;
-int x, y, o, N, count;
+int x, y, o, N, count = 0;
 unsigned int i, j, A=0, B=0;
 char counter[10];
 
