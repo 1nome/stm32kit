@@ -45,11 +45,13 @@ INLINE_STM32 void UART_RX_Setup(enum pin pin) {
 }
 
 INLINE_STM32 uint32_t UART_baudrate_calculate(int pclk, int desired_rate, int over8) {
+    //return (11 << 4) | (7 & 0x0F); // for 230400 baud @ 168Mhz
     const uint32_t div_sampling = (pclk * 25) / ((2 + 2 * (!!!over8)) * desired_rate);
     const uint32_t mantissa = div_sampling / 100;
     const uint32_t fraction = ((div_sampling - mantissa * 100) * 16 + 50) / 100;
 
     return (mantissa << 4) | (fraction & 0x0F);
+#endif
 #if UART_EDU
     // if (over8 == 0):
     return (pclk + desired_rate / 2) / desired_rate;
