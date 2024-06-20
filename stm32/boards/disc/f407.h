@@ -93,8 +93,12 @@
 #   define UART_TX      (PA2)
 #   define UART_RX      (PA3)
 
-/* I2C1 setup*/
-#   define I2C1_SDA     (PB7)
+/* I2C setup */
+#   define I2C1_SDA     (PB9)
 #   define I2C1_SCL     (PB6)
+#   define I2C3_SDA     (PC9)
+#   define I2C3_SCL     (PA8)
+
+/* I2S setup */
 
 #endif /* STM32_KIT_BOARDS_F407 */
