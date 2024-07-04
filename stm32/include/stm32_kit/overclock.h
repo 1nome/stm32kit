@@ -11,7 +11,7 @@
 
 #include "stm32_kit.h"
 #define HSE_VALUE 8000000
-#define PLLM_168 8
+#define PLLM 8
 #define PLLN_168 336
 #define PLLP_168 2
 #define PLLQ_168 7
@@ -41,7 +41,7 @@ void clock168Mhz(){
 
 	// nastaveni parametru pll
 	// setting the pll parameters
-	RCC->PLLCFGR =					PLLM_168
+	RCC->PLLCFGR =					PLLM
 								| (PLLN_168 << 6)
 								| (((PLLP_168 >> 1) -1) << 16)
 								| (PLLQ_168 << 24)

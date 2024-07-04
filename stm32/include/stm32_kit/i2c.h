@@ -11,7 +11,7 @@
 #include "pin.h"
 #include "boards.h"
  
-#define I2C1_FREQ 100000
+#define I2C1_FREQ 200000
 #define I2C1_DUTY 0.5
 #define I2C1_RISE 0.000001
 

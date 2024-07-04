@@ -100,5 +100,12 @@
 #   define I2C3_SCL     (PA8)
 
 /* I2S setup */
+#	define I2S3_WS		(PA4)
+#	define I2S3_MCK		(PC7)
+#	define I2S3_CK		(PC10)
+#	define I2S3_SD		(PC12)
+
+/* audio dac setup */
+#define AUDIO_DAC_RESET	(PD4)
 
 #endif /* STM32_KIT_BOARDS_F407 */
