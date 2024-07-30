@@ -102,6 +102,60 @@ INLINE_STM32 int UART_read(void *__restrict buf, size_t len) {
     return alen;
 }
 
+
+INLINE_STM32 void USART3_setup(void) {
+    UART_TX_Setup(USART3_TX);
+    UART_RX_Setup(USART3_RX);
+
+    RCC->APB1ENR |= RCC_APB1ENR_USART3EN;
+
+    USART3->BRR |= UART_baudrate_calculate(SystemCoreClock, UART_BAUDRATE, 0);
+    USART3->CR1 |= USART_CR1_TE | USART_CR1_RE; // Enable Tx & Rx
+    USART3->CR1 |= USART_CR1_UE; // USART Enable
+}
+
+//todo: move dma config to another file
+
+// max should be the size of dest;
+// the transfer stops itself after max is reached
+void USART3_dmar_start(uint8_t* dest, uint16_t max){
+	// enable dma requests on full recieve buffer
+	USART3->CR3 |= USART_CR3_DMAR;
+	
+	// enable clock to dma1 if not already enabled
+	RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
+	
+	// confirm that stream 1 is disabled
+	DMA1_Stream1->CR &= ~DMA_SxCR_EN;
+	while(DMA1_Stream1->CR & DMA_SxCR_EN);
+	
+	// USART3_RX is mapped to DMA 1 stream 1
+	// set the peripheral address
+	// DR has an offset of 0x04
+	DMA1_Stream1->PAR = USART3_BASE + 0x04;
+	
+	// set the destination memory address
+	DMA1_Stream1->M0AR = (uint32_t)dest;
+	
+	// config the number of item transfers
+	DMA1_Stream1->NDTR = max;
+	
+	// USART3_RX requests occur on channel 4 (0b100)
+	// direction is periph -> mem by default
+	// increment memory pointer after each transfer
+	// memory widths are 8b by default
+	DMA1_Stream1->CR =	DMA_SxCR_CHSEL_2
+						| DMA_SxCR_MINC;
+	
+	// enable the dma
+	DMA1_Stream1->CR |= DMA_SxCR_EN;
+}
+
+void USART3_dmar_stop(){
+	DMA1_Stream1->CR &= ~DMA_SxCR_EN;
+	while(DMA1_Stream1->CR & DMA_SxCR_EN);
+}
+
 #ifdef __cplusplus
 }
 #endif

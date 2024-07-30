@@ -92,6 +92,8 @@
 /* UART setup */
 #   define UART_TX      (PA2)
 #   define UART_RX      (PA3)
+#	define USART3_TX	(PB10)
+#	define USART3_RX	(PB11)
 
 /* I2C setup */
 #   define I2C1_SDA     (PB9)
@@ -106,6 +108,6 @@
 #	define I2S3_SD		(PC12)
 
 /* audio dac setup */
-#define AUDIO_DAC_RESET	(PD4)
+#	define AUDIO_DAC_RESET	(PD4)
 
 #endif /* STM32_KIT_BOARDS_F407 */
