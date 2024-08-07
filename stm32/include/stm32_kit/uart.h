@@ -38,6 +38,14 @@ INLINE_STM32 void UART_RX_Setup(enum pin pin) {
 }
 
 CONSTEXPR uint32_t UART_baudrate_calculate(int pclk, int desired_rate, int over8) {
+	// the default 16Mhz clock is fine for slow apb peripherals
+	// however, faster clocks have to be divided to be used on the apb
+	if(pclk > 84000000){
+		pclk /= 4;
+	}
+	else if(pclk > 42000000){
+		pclk /= 2;
+	}
     const uint32_t div_sampling = (pclk * 25) / ((2 + 2 * (!!!over8)) * desired_rate);
     const uint32_t mantissa = div_sampling / 100;
     const uint32_t fraction = ((div_sampling - mantissa * 100) * 16 + 50) / 100;
@@ -114,11 +122,35 @@ INLINE_STM32 void USART3_setup(void) {
     USART3->CR1 |= USART_CR1_UE; // USART Enable
 }
 
+INLINE_STM32 void USART3_putc(uint8_t znak) {
+    USART3->DR = znak;
+    while (!(USART3->SR & USART_SR_TXE)) {
+        // Wait for transmision to complete
+    }
+}
+
+INLINE_STM32 uint8_t USART3_getc(void) {
+    while (!(USART3->SR & USART_SR_RXNE)) {
+        // Wait for transmision to complete
+    }
+    return USART3->DR;
+}
+
+INLINE_STM32 size_t USART3_write(const void *__restrict buf, size_t len) {
+    uint8_t *str = (uint8_t *)buf;
+    int count = 0;
+    for (int i = len; i; --i) {
+        USART3_putc(*str);
+        str++;
+        count++;
+    }
+    return count;
+}
+
 //todo: move dma config to another file
 
-// max should be the size of dest;
-// the transfer stops itself after max is reached
-void USART3_dmar_start(uint8_t* dest, uint16_t max){
+// max should be the size of dest
+void USART3_dmar_setup(uint8_t* dest, uint16_t max){
 	// enable dma requests on full recieve buffer
 	USART3->CR3 |= USART_CR3_DMAR;
 	
@@ -143,11 +175,18 @@ void USART3_dmar_start(uint8_t* dest, uint16_t max){
 	// USART3_RX requests occur on channel 4 (0b100)
 	// direction is periph -> mem by default
 	// increment memory pointer after each transfer
+	// circular mode has to be enabled for the stop/continue funcs to work
 	// memory widths are 8b by default
 	DMA1_Stream1->CR =	DMA_SxCR_CHSEL_2
+						| DMA_SxCR_CIRC
 						| DMA_SxCR_MINC;
-	
-	// enable the dma
+}
+
+// once max is reached or the transfer is stopped,
+// the dma continues to write from the beginning of dest
+// intended use is to stop the transfer before dest fills up,
+// process the loaded data and then reenable it
+void USART3_dmar_continue(){
 	DMA1_Stream1->CR |= DMA_SxCR_EN;
 }
 
