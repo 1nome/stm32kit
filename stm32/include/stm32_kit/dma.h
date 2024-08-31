@@ -1,3 +1,15 @@
+/**
+ * @file	dma.h
+ * @author	1nome (Adam Wiszczor)
+ * 
+ * @brief	An attempt at a universal dma library
+ *			To setup a stream, first, set the addresses and number of transferred items using DMA_setup_addr()
+ *			Then use DMA_setup_data() to config data sizes and pointer incrementation
+ *			Finally, set the request channel and transfer direction using DMA_setup_behav()
+ *			If necessary, enable circular or dual buffer mode while calling this function
+ *			Additional config can be made with DMA_setup_interrupts(), _misc() and _fifo()
+ *			After setting everything, enable the stream with DMA_enable()
+ */
 #include "boards.h"
 #include <stdbool.h>
 
@@ -109,6 +121,7 @@ enum DMA_Prio{
 // priority level; higher priorities get processed first (pHigh > pLow)
 //  if two streams have the same priority, the lower-numbered is served first (p2 > p5)
 // peripheral flow controler; when true/1, the peripheral sets the number of data items to be transferred
+//  (do note that this works only with the SDIO peripheral)
 void DMA_setup_misc(uint8_t dma, uint8_t stream, enum DMA_Burst pburst, enum DMA_Burst mburst, enum DMA_Prio pl, bool pfctrl){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
@@ -131,6 +144,8 @@ enum DMA_Dir{
 
 // channel select; is from 0 to 7, sets the channel a stream will take transfer requests from
 // direction; transfers to/from peripherals behave differently to those in memory
+//  (when a peripheral is involved, it needs to request transfers; mem to mem runs full throttle)
+//  (mem to mem also works only for dma2 and forbids circular, dual buffer and direct modes)
 // circular mode; true/1 = enabled; when the ndtr(number of data) reaches 0,
 //  ndtr is reset to its original value
 // dual buffer mode; true/1 = enabled; automatically enables circular mode; when ndtr reaches 0,
@@ -146,6 +161,9 @@ void DMA_setup_behav(uint8_t dma, uint8_t stream, uint8_t chsel, enum DMA_Dir di
 	if(chsel > 7){
 		chsel = 0;
 	}
+	if(dir == MemToMem && (dma == 1 || (circ | dbm))){
+		return;
+	}
 	
 	s->CR &= ~(DMA_SxCR_CHSEL | DMA_SxCR_DIR | DMA_SxCR_CIRC | DMA_SxCR_DBM | DMA_SxCR_CT);
 	s->CR |= (chsel << DMA_SxCR_CHSEL_Pos)
@@ -157,6 +175,8 @@ void DMA_setup_behav(uint8_t dma, uint8_t stream, uint8_t chsel, enum DMA_Dir di
 
 // periph - peripheral/source memory address
 // mem0, mem1 - memory addresses, mem0 is always used, mem1 only in dbm
+// ndtr - number of data tranfers before transfer completes / starts from beginning / changes memory
+// also, setting an address/ndtr to null/0 will not change it
 void DMA_setup_addr(uint8_t dma, uint8_t stream, void* periph, void* mem0, void* mem1, uint16_t ndtr){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
@@ -169,21 +189,29 @@ void DMA_setup_addr(uint8_t dma, uint8_t stream, void* periph, void* mem0, void*
 	while(s->CR & DMA_SxCR_EN);
 	
 	// set the peripheral address
-	s->PAR = (uint32_t)periph;
+	if(periph){
+		s->PAR = (uint32_t)periph;
+	}
 	
 	// set the memory addresses
-	s->M0AR = (uint32_t)mem0;
-	s->M1AR = (uint32_t)mem1;
+	if(mem0){
+		s->M0AR = (uint32_t)mem0;
+	}
+	if(mem1){
+		s->M1AR = (uint32_t)mem1;
+	}
 	
 	// config the number of item transfers
-	s->NDTR = ndtr;
+	if(ndtr){
+		s->NDTR = ndtr;
+	}
 }
 
 enum DMA_FifoTresh{
 	Quarter = 0b00,
 	Half,
 	ThreeQ,
-	Full
+	Full_T
 };
 
 // fifo error interrupt enable; true/1 = enable
@@ -222,4 +250,105 @@ void DMA_disable(uint8_t dma, uint8_t stream){
 	}
 	
 	DMA_disable_handle(s);
+}
+
+// clear fifo error, direct mode error, transfer error, half transfer, transfer complete interrupt flag
+//  true/1 = clear flag
+void DMA_clear_int_flags(uint8_t dma, uint8_t stream, bool cfeif, bool cdmeif, bool cteif, bool chtif, bool ctcif){
+	uint32_t write = cfeif
+				| (cdmeif << DMA_LIFCR_CDMEIF0_Pos)
+				| (cteif << DMA_LIFCR_CTEIF0_Pos)
+				| (chtif << DMA_LIFCR_CHTIF0_Pos)
+				| (ctcif << DMA_LIFCR_CTCIF0_Pos);
+	
+	switch(dma){
+		case 1:
+			if(stream < 4){
+				DMA1->LIFCR |= write << (6 * stream);
+			}
+			stream -= 4;
+			if(stream < 4){
+				DMA1->HIFCR |= write << (6 * stream);
+			}
+			return;
+		case 2:
+			if(stream < 4){
+				DMA2->LIFCR |= write << (6 * stream);
+			}
+			stream -= 4;
+			if(stream < 4){
+				DMA2->HIFCR |= write << (6 * stream);
+			}
+			return;
+		default:
+			return;
+	}
+}
+
+// from lsb to msb: fifo error int flag, junk, direct mode error, transfer error,
+//  half transfer, transfer complete interrupt flag, junk, junk
+//  to get the value of a single flag, & the result with a macro
+//  tcif = *result* & DMA_LISR_TCIF0 (always use lisr_*int*0 or hisr_*int*4)
+uint8_t DMA_get_int_flags(uint8_t dma, uint8_t stream){
+	switch(dma){
+		case 1:
+			if(stream < 4){
+				return DMA1->LISR >> (6 * stream);
+			}
+			stream -= 4;
+			if(stream < 4){
+				return DMA1->HISR >> (6 * stream);
+			}
+			return 0;
+		case 2:
+			if(stream < 4){
+				return DMA2->LISR >> (6 * stream);
+			}
+			stream -= 4;
+			if(stream < 4){
+				return DMA2->HISR >> (6 * stream);
+			}
+			return 0;
+		default:
+			return 0;
+	}
+}
+
+// if dbm is enabled on a running stream, returns the memory pointer used at the moment
+bool DMA_get_ct(uint8_t dma, uint8_t stream){
+	DMA_Stream s = DMA_get_handle(dma, stream);
+	if(s == 0){
+		return false;
+	}
+	
+	return s->CR & DMA_SxCR_CT;
+}
+
+// useful if you want to pause a transfer and then continue from the last location
+//  add the difference of the original value and this to the pointer(s)
+uint16_t DMA_get_remaining_ndt(uint8_t dma, uint8_t stream){
+	DMA_Stream s = DMA_get_handle(dma, stream);
+	if(s == 0){
+		return false;
+	}
+	
+	return s->NDTR;
+}
+
+enum DMA_FifoStatus{
+	LessThanQuarter = 0b000,
+	LessThanHalf,
+	LessThanThreeQ,
+	LessThanFull,
+	Empty,
+	Full_S
+};
+
+uint8_t DMA_get_fifo_status(uint8_t dma, uint8_t stream){
+	DMA_Stream s = DMA_get_handle(dma, stream);
+	if(s == 0){
+		return false;
+	}
+	
+	return (s->FCR & DMA_SxFCR_FS) >> DMA_SxFCR_FS_Pos;
 }
