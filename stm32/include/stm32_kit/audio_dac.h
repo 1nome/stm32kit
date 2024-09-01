@@ -12,6 +12,7 @@
 #define STM32_KIT_AUDIO_DAC
 
 #include "i2c.h"
+#include "dma.h"
 
 #define CS43L22_ADDRESS 0x94
 
@@ -117,8 +118,6 @@ uint8_t I2S3_channel_side(){
 	return SPI3->DR & SPI_SR_CHSIDE ? 1 : 0;
 }
 
-//todo: move dma config to another file
-
 // transmit using the dma, dual buffer mode for easy data generation
 // using direct mode
 // the mcu uses little endian but i2s transfers msb first,
@@ -126,38 +125,25 @@ uint8_t I2S3_channel_side(){
 // buffSize should be even as there are two channels (left, right)
 // it also should be 32766 max (32767 possible but that would put a sample's channels in different buffers)
 void I2S3_transmit_dma_start(int32_t* buff1, int32_t* buff2, uint16_t buffSize){
-	// enable clock to dma1 if not already enabled
-	RCC->AHB1ENR |= RCC_AHB1ENR_DMA1EN;
-	
-	// confirm that stream 5 is disabled
-	DMA1_Stream5->CR &= ~DMA_SxCR_EN;
-	while(DMA1_Stream5->CR & DMA_SxCR_EN);
 	
 	// I2S3 (SPI3) dma request is mapped to DMA 1 stream 5
 	// set the peripheral address
 	// DR has an offset of 0x0C
-	DMA1_Stream5->PAR = SPI3_BASE + 0x0C;
-	
 	// set the memory addresses
-	DMA1_Stream5->M0AR = (uint32_t)buff1;
-	DMA1_Stream5->M1AR = (uint32_t)buff2;
-	
 	// config the number of item transfers
-	DMA1_Stream5->NDTR = buffSize * 2;
+	DMA_setup_addr(1, 5, SPI3_BASE + 0x0C, (uint32_t)buff1, (uint32_t)buff2, buffSize * 2);
 	
-	// I2S3 (SPI3) dma requests occur on channel 0 (no need to set)
+	// I2S3 (SPI3) dma requests occur on channel 0
 	// set the direction to mem -> periph
+	// enable double buffer mode (also automatically circular)
+	DMA_setup_behav(1, 5, 0, MemToPer, 0, 1, 0);
+	
 	// increment memory pointer after each transfer
 	// set peripheral and memory widths to 16b
-	// enable double buffer mode (also automatically circular)
-	DMA1_Stream5->CR =	DMA_SxCR_DIR_0
-						| DMA_SxCR_MINC
-						| DMA_SxCR_PSIZE_0
-						| DMA_SxCR_MSIZE_0
-						| DMA_SxCR_DBM;
-						
+	DMA_setup_data(1, 5, 0, 1, HalfWord, HalfWord, 0);
+	
 	// enable the dma
-	DMA1_Stream5->CR |= DMA_SxCR_EN;
+	DMA_enable(1, 5);
 }
 
 // dec value is B2 B1 B0, sent value is the same
@@ -172,12 +158,11 @@ void I2S_dma_formatData(int32_t* value){
 }
 
 void I2S3_transmit_dma_stop(){
-	DMA1_Stream5->CR &= ~DMA_SxCR_EN;
-	while(DMA1_Stream5->CR & DMA_SxCR_EN);
+	DMA_disable(1, 5);
 }
 
 uint8_t I2S3_dma_current_target(){
-	return DMA1_Stream5->CR & DMA_SxCR_CT ? 1 : 0;
+	return DMA_get_ct(1, 5);
 }
 
 void audio_dac_reg_write(uint8_t addr, uint8_t data){
@@ -191,9 +176,11 @@ void audio_dac_reg_write(uint8_t addr, uint8_t data){
 }
 
 //todo:
+/*
 uint8_t audio_dac_reg_read(uint8_t addr){
 	
 }
+*/
 
 void audio_dac_setup(){
 	__disable_irq();

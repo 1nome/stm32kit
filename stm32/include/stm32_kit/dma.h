@@ -10,6 +10,10 @@
  *			Additional config can be made with DMA_setup_interrupts(), _misc() and _fifo()
  *			After setting everything, enable the stream with DMA_enable()
  */
+ 
+ #ifndef STM32_KIT_DMA
+#define STM32_KIT_DMA
+ 
 #include "boards.h"
 #include <stdbool.h>
 
@@ -79,16 +83,16 @@ void DMA_setup_interrupts(uint8_t dma, uint8_t stream, bool dmeie, bool teie, bo
 }
 
 // 8b, 16b, 32b
-enum DMA_Size{
-	Byte = 0b00,
+typedef enum{
+	Byte = 0,
 	HalfWord,
 	Word
-};
+} DMA_Size;
 
 // peripheral, memory ptr increment, size of those increments
 //  true/1 = do increment
 // pincos when true sets the peripheral offset to 4B; psize or msize don't have to be 4B
-void DMA_setup_data(uint8_t dma, uint8_t stream, bool pinc, bool minc, enum DMA_Size psize, enum DMA_Size msize, bool pincos){
+void DMA_setup_data(uint8_t dma, uint8_t stream, bool pinc, bool minc, DMA_Size psize, DMA_Size msize, bool pincos){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
 		return;
@@ -103,26 +107,26 @@ void DMA_setup_data(uint8_t dma, uint8_t stream, bool pinc, bool minc, enum DMA_
 			| (pincos << DMA_SxCR_PINCOS_Pos);
 }
 
-enum DMA_Burst{
-	Single = 0b00,
+typedef enum{
+	Single = 0,
 	Incr4,
 	Incr8,
 	Incr16
-};
+} DMA_Burst;
 
-enum DMA_Prio{
-	Low = 0b00,
+typedef enum{
+	Low = 0,
 	Medium,
 	High,
 	VeryHigh
-};
+} DMA_Prio;
 
 // peripheral, memory burst transfer config; these only work if direct mode is disabled
 // priority level; higher priorities get processed first (pHigh > pLow)
 //  if two streams have the same priority, the lower-numbered is served first (p2 > p5)
 // peripheral flow controler; when true/1, the peripheral sets the number of data items to be transferred
 //  (do note that this works only with the SDIO peripheral)
-void DMA_setup_misc(uint8_t dma, uint8_t stream, enum DMA_Burst pburst, enum DMA_Burst mburst, enum DMA_Prio pl, bool pfctrl){
+void DMA_setup_misc(uint8_t dma, uint8_t stream, DMA_Burst pburst, DMA_Burst mburst, DMA_Prio pl, bool pfctrl){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
 		return;
@@ -136,11 +140,11 @@ void DMA_setup_misc(uint8_t dma, uint8_t stream, enum DMA_Burst pburst, enum DMA
 			| (pfctrl << DMA_SxCR_PFCTRL_Pos);
 }
 
-enum DMA_Dir{
-	PerToMem = 0b00,
+typedef enum{
+	PerToMem = 0,
 	MemToPer,
 	MemToMem
-};
+} DMA_Dir;
 
 // channel select; is from 0 to 7, sets the channel a stream will take transfer requests from
 // direction; transfers to/from peripherals behave differently to those in memory
@@ -151,7 +155,7 @@ enum DMA_Dir{
 // dual buffer mode; true/1 = enabled; automatically enables circular mode; when ndtr reaches 0,
 //  transfers continue from/to the other memory address
 // current target; sets the initial memory target (mem0 or mem1)
-void DMA_setup_behav(uint8_t dma, uint8_t stream, uint8_t chsel, enum DMA_Dir dir, bool circ, bool dbm, bool ct){
+void DMA_setup_behav(uint8_t dma, uint8_t stream, uint8_t chsel, DMA_Dir dir, bool circ, bool dbm, bool ct){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
 		return;
@@ -177,28 +181,24 @@ void DMA_setup_behav(uint8_t dma, uint8_t stream, uint8_t chsel, enum DMA_Dir di
 // mem0, mem1 - memory addresses, mem0 is always used, mem1 only in dbm
 // ndtr - number of data tranfers before transfer completes / starts from beginning / changes memory
 // also, setting an address/ndtr to null/0 will not change it
-void DMA_setup_addr(uint8_t dma, uint8_t stream, void* periph, void* mem0, void* mem1, uint16_t ndtr){
+void DMA_setup_addr(uint8_t dma, uint8_t stream, uint32_t periph, uint32_t mem0, uint32_t mem1, uint16_t ndtr){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
 		return;
 	}
 	DMA_disable_handle(s);
 	
-	// confirm that stream is disabled
-	s->CR &= ~DMA_SxCR_EN;
-	while(s->CR & DMA_SxCR_EN);
-	
 	// set the peripheral address
 	if(periph){
-		s->PAR = (uint32_t)periph;
+		s->PAR = periph;
 	}
 	
 	// set the memory addresses
 	if(mem0){
-		s->M0AR = (uint32_t)mem0;
+		s->M0AR = mem0;
 	}
 	if(mem1){
-		s->M1AR = (uint32_t)mem1;
+		s->M1AR = mem1;
 	}
 	
 	// config the number of item transfers
@@ -207,12 +207,12 @@ void DMA_setup_addr(uint8_t dma, uint8_t stream, void* periph, void* mem0, void*
 	}
 }
 
-enum DMA_FifoTresh{
-	Quarter = 0b00,
+typedef enum{
+	Quarter = 0,
 	Half,
 	ThreeQ,
 	Full_T
-};
+} DMA_FifoTresh;
 
 // fifo error interrupt enable; true/1 = enable
 // direct mode disable; false/0 = direct mode enabled, it is enabled by default
@@ -221,7 +221,7 @@ enum DMA_FifoTresh{
 // fifo threshhold selection - default is half; fifo size is 4 words (16B)
 //  fifo has to have enough data for a mburst, so a 1/4 thresh and incr4 burst
 //  isn't allowed for msize = half-word and word, but works for byte
-void DMA_setup_fifo(uint8_t dma, uint8_t stream, bool feie, bool dmdis, enum DMA_FifoTresh fth){
+void DMA_setup_fifo(uint8_t dma, uint8_t stream, bool feie, bool dmdis, DMA_FifoTresh fth){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
 		return;
@@ -335,20 +335,22 @@ uint16_t DMA_get_remaining_ndt(uint8_t dma, uint8_t stream){
 	return s->NDTR;
 }
 
-enum DMA_FifoStatus{
-	LessThanQuarter = 0b000,
+typedef enum{
+	LessThanQuarter = 0,
 	LessThanHalf,
 	LessThanThreeQ,
 	LessThanFull,
 	Empty,
 	Full_S
-};
+} DMA_FifoStatus;
 
-uint8_t DMA_get_fifo_status(uint8_t dma, uint8_t stream){
+DMA_FifoStatus DMA_get_fifo_status(uint8_t dma, uint8_t stream){
 	DMA_Stream s = DMA_get_handle(dma, stream);
 	if(s == 0){
-		return false;
+		return 0;
 	}
 	
 	return (s->FCR & DMA_SxFCR_FS) >> DMA_SxFCR_FS_Pos;
 }
+
+#endif /* STM32_KIT_DMA */
