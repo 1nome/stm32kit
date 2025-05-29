@@ -45,3 +45,7 @@ Testováno s `ARM Keil uVision 5.18+` (5.37 - hlavní vývojová verze pro 1.5).
 ## Známé problémy
 
 - `NUCLEO G071`: nefunguje `debug` mod
+
+## PlatformIO
+
+Projekt lze otevřít i v PlatformIO (VS Code extension); zatím implementováno pouze pro F407, RTOS není podporován.

@@ -1,3 +1,6 @@
 [submodule "docs"]
 	path = docs
 	url = https://github.com/spsehavirov/stm32kit-docs.git
+[submodule "demos"]
+	path = demos
+	url = https://github.com/1nome/stmkit_demos

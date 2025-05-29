@@ -41,6 +41,9 @@
  *                  ROW1    PD7
  *                  ROW2    PD8
  *                  ROW3    PD9
+ *			I2C:
+ *									SDA			PB7
+ *									SCL			PB6
  *
  * @date       2023-03-29
  * @copyright  Copyright SPSE Havirov (c) 2023
@@ -89,5 +92,22 @@
 /* UART setup */
 #   define UART_TX      (PA2)
 #   define UART_RX      (PA3)
+#	define USART3_TX	(PB10)
+#	define USART3_RX	(PB11)
+
+/* I2C setup */
+#   define I2C1_SDA     (PB9)
+#   define I2C1_SCL     (PB6)
+#   define I2C3_SDA     (PC9)
+#   define I2C3_SCL     (PA8)
+
+/* I2S setup */
+#	define I2S3_WS		(PA4)
+#	define I2S3_MCK		(PC7)
+#	define I2S3_CK		(PC10)
+#	define I2S3_SD		(PC12)
+
+/* audio dac setup */
+#	define AUDIO_DAC_RESET	(PD4)
 
 #endif /* STM32_KIT_BOARDS_F407 */
