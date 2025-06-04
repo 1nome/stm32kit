@@ -58,30 +58,38 @@ CONSTEXPR uint32_t UART_baudrate_calculate(int pclk, int desired_rate, int over8
 #endif
 }
 
+#if UART_ALT == 0
+#define USART USART2
+#define EN RCC_APB1ENR_USART2EN
+#else
+#define USART USART3
+#define EN RCC_APB1ENR_USART3EN
+#endif
+
 INLINE_STM32 void UART_setup(void) {
     UART_TX_Setup(UART_TX);
     UART_RX_Setup(UART_RX);
 
-    RCC->APB1ENR |= RCC_APB1ENR_USART2EN;
+    RCC->APB1ENR |= EN;
 
-    USART2->BRR |= UART_baudrate_calculate(SystemCoreClock, UART_BAUDRATE, 0);
-    USART2->CR1 |= USART_CR1_TE | USART_CR1_RE; // Enable Tx & Rx
-    USART2->CR1 |= USART_CR1_UE; // USART Enable
+    USART->BRR |= UART_baudrate_calculate(SystemCoreClock, UART_BAUDRATE, 0);
+    USART->CR1 |= USART_CR1_TE | USART_CR1_RE; // Enable Tx & Rx
+    USART->CR1 |= USART_CR1_UE; // USART Enable
 }
 
 
 INLINE_STM32 void UART_putc(uint8_t znak) {
-    USART2->DR = znak;
-    while (!(USART2->SR & USART_SR_TXE)) {
+    USART->DR = znak;
+    while (!(USART->SR & USART_SR_TXE)) {
         // Wait for transmision to complete
     }
 }
 
 INLINE_STM32 uint8_t UART_getc(void) {
-    while (!(USART2->SR & USART_SR_RXNE)) {
+    while (!(USART->SR & USART_SR_RXNE)) {
         // Wait for transmision to complete
     }
-    return USART2->DR;
+    return USART->DR;
 }
 
 INLINE_STM32 size_t UART_write(const void *__restrict buf, size_t len) {
@@ -111,77 +119,48 @@ INLINE_STM32 int UART_read(void *__restrict buf, size_t len) {
     return alen;
 }
 
-
-INLINE_STM32 void USART3_setup(void) {
-    UART_TX_Setup(USART3_TX);
-    UART_RX_Setup(USART3_RX);
-
-    RCC->APB1ENR |= RCC_APB1ENR_USART3EN;
-
-    USART3->BRR |= UART_baudrate_calculate(SystemCoreClock, UART_BAUDRATE, 0);
-    USART3->CR1 |= USART_CR1_TE | USART_CR1_RE; // Enable Tx & Rx
-    USART3->CR1 |= USART_CR1_UE; // USART Enable
-}
-
-INLINE_STM32 void USART3_putc(uint8_t znak) {
-    USART3->DR = znak;
-    while (!(USART3->SR & USART_SR_TXE)) {
-        // Wait for transmision to complete
-    }
-}
-
-INLINE_STM32 uint8_t USART3_getc(void) {
-    while (!(USART3->SR & USART_SR_RXNE)) {
-        // Wait for transmision to complete
-    }
-    return USART3->DR;
-}
-
-INLINE_STM32 size_t USART3_write(const void *__restrict buf, size_t len) {
-    uint8_t *str = (uint8_t *)buf;
-    int count = 0;
-    for (int i = len; i; --i) {
-        USART3_putc(*str);
-        str++;
-        count++;
-    }
-    return count;
-}
+#if UART_ALT == 0
+#define USART_BASE USART2_BASE
+#define DMA_Stream DMA1_Stream5
+#else
+#define USART_BASE USART3_BASE
+#define DMA_Stream DMA1_Stream1
+#endif
 
 // max should be the size of dest
-void USART3_dmar_setup(uint8_t* dest, const uint16_t max){
+void UART_dmar_setup(uint8_t* dest, const uint16_t max){
     DMA1_init();
 
 	// enable dma requests on full recieve buffer
-	USART3->CR3 |= USART_CR3_DMAR;
+	USART->CR3 |= USART_CR3_DMAR;
 	
-	// USART3_RX is mapped to DMA 1 stream 1
+	// USART3_RX is mapped to DMA 1 stream 1, USART2_RX is mapped to DMA 1 stream 5
 	// set the peripheral address
 	// DR has an offset of 0x04
 	// set the destination memory address
 	// config the number of item transfers
-	DMA_setup_addr(DMA1_Stream1, USART3_BASE + 0x04, (uint32_t)dest, 0, max);
+	DMA_setup_addr(DMA_Stream, USART_BASE + 0x04, (uint32_t)dest, 0, max);
 	
-	// USART3_RX requests occur on channel 4 (0b100)
+	// USART3_RX and USART2_RX requests occur on channel 4 (0b100)
 	// direction is periph -> mem
 	// circular mode has to be enabled for the stop/continue funcs to work
-	DMA_setup_behav(DMA1_Stream1, 4, PerToMem, 1, 0, 0);
+	DMA_setup_behav(DMA_Stream, 4, PerToMem, 1, 0, 0);
 	
 	// increment memory pointer after each transaction
 	// memory widths are 8b
-	DMA_setup_data(DMA1_Stream1, 0, 1, Byte, Byte, 0);
+	DMA_setup_data(DMA_Stream, 0, 1, Byte, Byte, 0);
 }
 
 // once max is reached or the transfer is stopped,
 // the dma continues to write from the beginning of dest
 // intended use is to stop the transfer before dest fills up,
 // process the loaded data and then reenable it
-void USART3_dmar_continue(){
-	DMA_enable(DMA1_Stream1);
+void UART_dmar_continue(){
+	DMA_enable(DMA_Stream);
 }
 
-void USART3_dmar_stop(){
-	DMA_disable(DMA1_Stream1);
+void UART_dmar_stop(){
+	DMA_disable(DMA_Stream);
 }
 
 #ifdef __cplusplus

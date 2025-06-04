@@ -88,6 +88,25 @@ extern "C" {
  #define UART_BAUDRATE        9600
 #endif
 
+// <q>UART over PD8 and PD9 (instead of PA2 and PA3)
+// ===============================
+// <i> Enable when you need ethernet and uart simultaneously.
+// <i> This uses pins for the keyboard, so it won't work with it.
+#ifndef UART_ALT
+#define UART_ALT    1
+#endif
+
+// <h>Interrupts
+// ===============================
+
+
+// <q>Custom SysTick_Handler
+// ===============================
+// <i> SysTick_Handler will not be defined in chrono.h.
+// <i> Note that this breaks everything that uses delays in non-RTOS mode.
+#ifndef CUSTOM_SYSTICK_HANDLER
+#define CUSTOM_SYSTICK_HANDLER    0
+#endif
 
 //------------- <<< end of configuration section >>> -----------------------
 

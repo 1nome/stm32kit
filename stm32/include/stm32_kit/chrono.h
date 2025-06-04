@@ -70,10 +70,12 @@ extern "C" {
 #if !defined(RTE_CMSIS_RTOS2) && !defined(__RL_ARM_VER)
 static volatile uint32_t Ticks; // Vyuzito pro SysTick k nacitani Ticku pri podteceni.
 
+#if CUSTOM_SYSTICK_HANDLER == 0
 /**
  * @brief  Rutina pro obsluhu preruseni SysTick.
  */
 void SysTick_Handler(void) { Ticks++; }
+#endif
 
 /**
  * @brief Funkce pro umele pozdrzeni programu.

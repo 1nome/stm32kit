@@ -53,6 +53,7 @@
 #define STM32_KIT_BOARDS_F407
 
 #include "stm32_kit/gpio.h"
+#include "config.h"
 
 /* LED setup */
 #   define LED_IN_0     (PD12) // Vestavene LED
@@ -90,10 +91,13 @@
 #   define ADC_1        (PA1)
 
 /* UART setup */
+#if UART_ALT == 0
 #   define UART_TX      (PA2)
 #   define UART_RX      (PA3)
-#	define USART3_TX	(PB10)
-#	define USART3_RX	(PB11)
+#else
+#	define UART_TX	    (PD8)
+#	define UART_RX  	(PD9)
+#endif
 
 /* I2C setup */
 #   define I2C1_SDA     (PB9)

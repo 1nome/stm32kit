@@ -127,24 +127,24 @@ uint8_t I2S3_channel_side(){
 void I2S3_transmit_dma_start(int32_t* buff1, int32_t* buff2, const uint16_t buffSize){
 	DMA1_init();
 
-	// I2S3 (SPI3) dma request is mapped to DMA 1 stream 5
+	// I2S3 (SPI3) dma request is mapped to DMA 1 stream 7 (and 5)
 	// set the peripheral address
 	// DR has an offset of 0x0C
 	// set the memory addresses
 	// config the number of item transfers
-	DMA_setup_addr(DMA1_Stream5, SPI3_BASE + 0x0C, (uint32_t)buff1, (uint32_t)buff2, buffSize * 2);
+	DMA_setup_addr(DMA1_Stream7, SPI3_BASE + 0x0C, (uint32_t)buff1, (uint32_t)buff2, buffSize * 2);
 	
 	// I2S3 (SPI3) dma requests occur on channel 0
 	// set the direction to mem -> periph
 	// enable double buffer mode (also automatically circular)
-	DMA_setup_behav(DMA1_Stream5, 0, MemToPer, 0, 1, 0);
+	DMA_setup_behav(DMA1_Stream7, 0, MemToPer, 0, 1, 0);
 	
 	// increment memory pointer after each transfer
 	// set peripheral and memory widths to 16b
-	DMA_setup_data(DMA1_Stream5, 0, 1, HalfWord, HalfWord, 0);
+	DMA_setup_data(DMA1_Stream7, 0, 1, HalfWord, HalfWord, 0);
 	
 	// enable the dma
-	DMA_enable(DMA1_Stream5);
+	DMA_enable(DMA1_Stream7);
 }
 
 // dec value is B2 B1 B0, sent value is the same
@@ -159,11 +159,11 @@ void I2S_dma_formatData(int32_t* value){
 }
 
 void I2S3_transmit_dma_stop(){
-	DMA_disable(DMA1_Stream5);
+	DMA_disable(DMA1_Stream7);
 }
 
 uint8_t I2S3_dma_current_target(){
-	return DMA_get_ct(DMA1_Stream5);
+	return DMA_get_ct(DMA1_Stream7);
 }
 
 void audio_dac_reg_write(const uint8_t addr, const uint8_t data){
