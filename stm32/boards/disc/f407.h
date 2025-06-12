@@ -114,4 +114,15 @@
 /* audio dac setup */
 #	define AUDIO_DAC_RESET	(PD4)
 
+/* ethernet */
+#define ETH_RMII_REF_CLK    (PA1)
+#define ETH_RMII_TXD0       (PB12)
+#define ETH_RMII_TXD1       (PB13)
+#define ETH_RMII_TX_EN      (PB11)
+#define ETH_RMII_RXD0       (PC4)
+#define ETH_RMII_RXD1       (PC5)
+#define ETH_RMII_CRS_DV     (PA7)
+#define ETH_MDIO            (PA2)
+#define ETH_MDC             (PC1)
+
 #endif /* STM32_KIT_BOARDS_F407 */
