@@ -114,4 +114,10 @@
 /* audio dac setup */
 #	define AUDIO_DAC_RESET	(PD4)
 
+/* tft display */
+#define SPI2_SCK		(PB10)
+#define SPI2_MOSI		(PB15)
+#define TFT_RES         (PB14)
+#define TFT_DC          (PB10)
+
 #endif /* STM32_KIT_BOARDS_F407 */
