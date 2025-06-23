@@ -23,6 +23,7 @@
 // defines and logic sourced from:
 // https://github.com/wilmsn/Arduino-ST7789-Library
 
+// not all possible commands; read the datasheet for more
 #define ST7789_NOP     0x00
 #define ST7789_SWRESET 0x01
 #define ST7789_RDDID   0x04
@@ -57,6 +58,8 @@
 #define ST7789_RDID3   0xDC
 #define ST7789_RDID4   0xDD
 
+#define ST7789_WRMEMC     0x3C
+
 // r, g, b in range 0-255 (248/252); the least significant bits are discarded
 uint16_t color565(const uint8_t r, const uint8_t g, const uint8_t b)
 {
@@ -76,7 +79,6 @@ void TFT_SPI2_init()
     SPI2->CR1 &= ~SPI_CR1_BR_Msk;   // maximum possible speed
     SPI2->CR1 |= SPI_CR1_CPOL;      // clock 1 when idle
     SPI2->CR1 |= SPI_CR1_CPHA;     // capture data on the second transition (rising edge)
-    // todo: test with 16-bit
     SPI2->CR1 &= ~SPI_CR1_DFF;      // 8-bit data
     SPI2->CR1 &= ~SPI_CR1_LSBFIRST; // msb first
     SPI2->CR1 |= SPI_CR1_MSTR;      // master mode
@@ -89,16 +91,29 @@ void TFT_SPI2_init()
     __enable_irq();
 }
 
+// because the tft reads the data/command pin on the eight SCL rising edge of all places,
+// and the TXE bit set doesn't mean the transfer is complete,
+// race conditions will inevitably occur (currently transmitted data can be interpreted as a command and vice versa)
+// ** THIS HAS MOST LIKELY BEEN FIXED **
+
 // busy waiting; should be used for small transfers
 void SPI2_transmit(const uint8_t data)
 {
-    SPI2->DR = data;
     while (!(SPI2->SR & SPI_SR_TXE)){}
+    SPI2->DR = data;
+}
+
+// busily waits for the spi to not be busy
+void SPI2_wait_for_idle()
+{
+    while (!(SPI2->SR & SPI_SR_TXE)){}
+    while (SPI2->SR & SPI_SR_BSY){}
 }
 
 // writes a command to the display
 void TFT_write_command(const uint8_t cmd)
 {
+    SPI2_wait_for_idle();
     io_set(TFT_DC, 0);
     SPI2_transmit(cmd);
 }
@@ -106,8 +121,20 @@ void TFT_write_command(const uint8_t cmd)
 // writes data to the display
 void TFT_write_data(const uint8_t data)
 {
+    SPI2_wait_for_idle();
     io_set(TFT_DC, 1);
     SPI2_transmit(data);
+}
+
+// writes multiple data to the display
+void TFT_write_multiple_data(const uint8_t * data, const uint32_t len)
+{
+    SPI2_wait_for_idle();
+    io_set(TFT_DC, 1);
+    for (uint32_t i = 0; i < len; i++)
+    {
+        SPI2_transmit(data[i]);
+    }
 }
 
 // internal; initializes the Data/Command and Reset pins
@@ -117,6 +144,44 @@ void TFT_pin_init()
     pin_setup(TFT_DC, PIN_MODE_OUTPUT, PIN_PULL_NONE, PIN_SPEED_HIGH, PIN_TYPE_PUSHPULL);
     pin_setup(TFT_RES, PIN_MODE_OUTPUT, PIN_PULL_NONE, PIN_SPEED_LOW, PIN_TYPE_PUSHPULL);
     __enable_irq();
+}
+
+// sets the window where pixels will be written
+void TFT_set_addr_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
+{
+    x0 += TFT_XSTART;
+    x1 += TFT_XSTART;
+    y0 += TFT_YSTART;
+    y1 += TFT_YSTART;
+
+    TFT_write_command(ST7789_CASET); // column addresses
+    {
+        const uint8_t data[] = {x0 >> 8, x0 & 0xFF, x1 >> 8, x1 & 0xFF};
+        TFT_write_multiple_data(data, 4);
+    }
+
+    TFT_write_command(ST7789_RASET); // row addresses
+    {
+        const uint8_t data[] = {y0 >> 8, y0 & 0xFF, y1 >> 8, y1 & 0xFF};
+        TFT_write_multiple_data(data, 4);
+    }
+}
+
+// switches the display to partial mode, parameters are partial area dimensions
+void TFT_set_partial_mode(const uint16_t y0, const uint16_t y1)
+{
+    TFT_write_command(ST7789_PTLAR);
+    {
+        const uint8_t data[] = {y0 >> 8 , y0 & 0xFF, y1 >> 8 , y1 & 0xFF};
+        TFT_write_multiple_data(data, 4);
+    }
+    TFT_write_command(ST7789_PTLON);
+}
+
+// switches the display to normal mode
+void TFT_set_normal_mode()
+{
+    TFT_write_command(ST7789_NORON); // normal display on
 }
 
 // internal; initializes the display to 16-bit color and reasonable settings
@@ -133,16 +198,7 @@ void TFT_display_init()
     delay_ms(10);
     TFT_write_command(ST7789_MADCTL); // memory access rules
     TFT_write_data(0x00); // [row, col], bottom to top
-    TFT_write_command(ST7789_CASET); // column addresses
-    TFT_write_data(0x00);
-    TFT_write_data(TFT_XSTART);
-    TFT_write_data((TFT_WIDTH + TFT_XSTART) >> 8);
-    TFT_write_data((TFT_WIDTH + TFT_XSTART) & 0xFF);
-    TFT_write_command(ST7789_RASET); // row addresses
-    TFT_write_data(0x00);
-    TFT_write_data(TFT_YSTART);
-    TFT_write_data((TFT_HEIGHT + TFT_YSTART) >> 8);
-    TFT_write_data((TFT_HEIGHT + TFT_YSTART) & 0xFF);
+    TFT_set_addr_window(0, 0, TFT_WIDTH - 1, TFT_HEIGHT - 1);
     TFT_write_command(ST7789_INVON); // inversion on
     delay_ms(10);
     TFT_write_command(ST7789_NORON); // normal display on
@@ -151,7 +207,8 @@ void TFT_display_init()
     delay_ms(500);
 }
 
-// todo:
+// rotates the image
+// actually changes how the data is sent from color ram to the display
 void TFT_set_rotation(uint8_t rotation)
 {
     TFT_write_command(ST7789_MADCTL);
@@ -194,27 +251,18 @@ void TFT_setup()
     TFT_set_rotation(2); // effectively a no-op
 }
 
-// sets the window where pixels will be written
-void TFT_set_addr_window(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1)
+// use before writing pixel data to the display; usually after setting the address window
+// will start writing from x0, y0
+void TFT_start_colors()
 {
-    x0 += TFT_XSTART;
-    x1 += TFT_XSTART;
-    y0 += TFT_YSTART;
-    y1 += TFT_YSTART;
-
-    TFT_write_command(ST7789_CASET); // column addresses
-    TFT_write_data(x0 >> 8);
-    TFT_write_data(x0 & 0xFF);
-    TFT_write_data(x1 >> 8);
-    TFT_write_data(x1 & 0xFF);
-
-    TFT_write_command(ST7789_RASET); // row addresses
-    TFT_write_data(y0 >> 8);
-    TFT_write_data(y0 & 0xFF);
-    TFT_write_data(y1 >> 8);
-    TFT_write_data(y1 & 0xFF);
-
     TFT_write_command(ST7789_RAMWR); // write to ram
+}
+
+// use before writing pixel data to the display; usually after setting the address window
+// will start writing from x0, y0; will break if rotation was used
+void TFT_continue_colors()
+{
+    TFT_write_command(ST7789_WRMEMC);
 }
 
 // simple drawing functions
@@ -229,7 +277,9 @@ void TFT_draw_pixel(const int16_t x, const int16_t y, const uint16_t color)
         return;
     }
 
-    TFT_set_addr_window(x, y, x + 1, y + 1);
+    TFT_set_addr_window(x, y, x, y);
+    TFT_start_colors();
+    SPI2_wait_for_idle();
     io_set(TFT_DC, 1);
     SPI2_transmit(color >> 8);
     SPI2_transmit(color);
@@ -238,6 +288,7 @@ void TFT_draw_pixel(const int16_t x, const int16_t y, const uint16_t color)
 // writes a single color count times to the display
 void TFT_push_color(const uint16_t color, int32_t count)
 {
+    SPI2_wait_for_idle();
     io_set(TFT_DC, 1);
     const uint8_t hi = color >> 8;
     const uint8_t lo = color;
@@ -261,6 +312,7 @@ void TFT_draw_vline(const int16_t x, const int16_t y, int16_t h, const uint16_t 
     }
 
     TFT_set_addr_window(x, y, x, y + h - 1);
+    TFT_start_colors();
     TFT_push_color(color, h);
 }
 
@@ -277,6 +329,7 @@ void TFT_draw_hline(const int16_t x, const int16_t y, int16_t w, const uint16_t 
     }
 
     TFT_set_addr_window(x, y, x + w - 1, y);
+    TFT_start_colors();
     TFT_push_color(color, w);
 }
 
@@ -297,13 +350,14 @@ void TFT_draw_rectangle(const int16_t x, const int16_t y, int16_t w, int16_t h, 
     }
 
     TFT_set_addr_window(x, y, x + w - 1, y + h - 1);
+    TFT_start_colors();
     TFT_push_color(color, w * h);
 }
 
-// todo:
+// inverts colors on the display; for example, black -> white, red -> cyan etc.
 void TFT_invert_display(const bool enable)
 {
-    TFT_write_command(enable ? ST7789_INVON : ST7789_INVOFF);
+    TFT_write_command(enable ? ST7789_INVOFF : ST7789_INVON);
 }
 
 #endif //STM32_KIT_TFT
