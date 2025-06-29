@@ -41,9 +41,6 @@
  *                  ROW1    PD7
  *                  ROW2    PD8
  *                  ROW3    PD9
- *			I2C:
- *									SDA			PB7
- *									SCL			PB6
  *
  * @date       2023-03-29
  * @copyright  Copyright SPSE Havirov (c) 2023
@@ -101,9 +98,11 @@
 
 /* I2C setup */
 #   define I2C1_SDA     (PB9)
+#if I2C_ALT1 == 1
 #   define I2C1_SCL     (PB6)
-#   define I2C3_SDA     (PC9)
-#   define I2C3_SCL     (PA8)
+#else
+#   define I2C1_SCL    (PB8)
+#endif
 
 /* I2S setup */
 #	define I2S3_WS		(PA4)
@@ -113,5 +112,22 @@
 
 /* audio dac setup */
 #	define AUDIO_DAC_RESET	(PD4)
+
+/* dcmi setup */
+#define DCMI_D0     (PC6)
+#define DCMI_D1     (PC7)
+#define DCMI_D2     (PC8)
+#define DCMI_D3     (PC9)
+#define DCMI_D4     (PC11)
+#define DCMI_D5     (PB6)
+#define DCMI_D6     (PE5)
+#define DCMI_D7     (PE6)
+#define DCMI_HSYNC  (PA4)
+#define DCMI_VSYNC  (PB7)
+#define DCMI_PIXCLK (PA6)
+
+/* cam setup */
+#define CAM_CLK     (PA8)   // MCO1
+#define CAM_RST     (PC12)
 
 #endif /* STM32_KIT_BOARDS_F407 */

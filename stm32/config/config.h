@@ -108,6 +108,16 @@ extern "C" {
 #define CUSTOM_SYSTICK_HANDLER    0
 #endif
 
+
+// <h> I2C
+
+// <q> Alt SCL
+// ===============================
+// <i> Enable for DCMI to work properly.
+// <i> The audio dac won't work with this enabled.
+#ifndef I2C_ALT
+#define I2C_ALT    1
+#endif
 //------------- <<< end of configuration section >>> -----------------------
 
 // Defaultni rozlozeni pro 4x4 KeyPad
