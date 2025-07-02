@@ -113,7 +113,7 @@
 /* audio dac setup */
 #	define AUDIO_DAC_RESET	(PD4)
 
-/* dcmi setup */
+/* DCMI setup */
 #define DCMI_D0     (PC6)
 #define DCMI_D1     (PC7)
 #define DCMI_D2     (PC8)
@@ -126,8 +126,11 @@
 #define DCMI_VSYNC  (PB7)
 #define DCMI_PIXCLK (PA6)
 
+/* MCO setup */
+#define MCO1 (PA8)
+#define MCO2 (PC9)
+
 /* cam setup */
-#define CAM_CLK     (PA8)   // MCO1
 #define CAM_RST     (PC12)
 
 #endif /* STM32_KIT_BOARDS_F407 */
