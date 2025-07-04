@@ -30,6 +30,7 @@ typedef enum
     Div5
 } MCO_pre;
 
+// sets up the microcontroller clock out 1 pin
 void MCO1_setup(const MCO1_src clkSrc, const MCO_pre div)
 {
     pin_setup_af(MCO1, PIN_MODE_AF, PIN_PULL_NONE, PIN_SPEED_VERYHIGH, PIN_TYPE_PUSHPULL, PIN_AF0);
@@ -39,6 +40,7 @@ void MCO1_setup(const MCO1_src clkSrc, const MCO_pre div)
     RCC->CFGR |= (div & RCC_CFGR_MCO1PRE) << RCC_CFGR_MCO1PRE_Pos;
 }
 
+// sets up pins and enables clock for the DCMI
 void DCMI_init()
 {
     pin_setup_af(DCMI_D0, PIN_MODE_AF, PIN_PULL_NONE, PIN_SPEED_HIGH, PIN_TYPE_PUSHPULL, PIN_AF13);
@@ -56,6 +58,7 @@ void DCMI_init()
     RCC->AHB2ENR |= RCC_AHB2ENR_DCMIEN;
 }
 
+// configs the DCMI for the OV7670
 void OV7670_DCMI_setup()
 {
     DCMI->CR &= ~(DCMI_CR_JPEG |        // raw video
@@ -334,6 +337,7 @@ static struct regval_list ov7670_rgb565_config[] = {
 
 // ***********************************************************************
 
+// writes to a register of the OV7670
 void CAM_reg_write(const uint8_t reg, const uint8_t value)
 {
     I2C1_start();
@@ -343,6 +347,8 @@ void CAM_reg_write(const uint8_t reg, const uint8_t value)
     I2C1_stop();
 }
 
+// writes multiple data to the registers of the OV7670
+// regvals has to end with a {0xFF, 0xFF}, else this will access out of bounds memory
 void CAM_reg_write_multiple(const struct regval_list* regvals)
 {
     int i = 0;
@@ -358,6 +364,7 @@ void CAM_reg_write_multiple(const struct regval_list* regvals)
     }
 }
 
+// reads from a register of the OV7670
 uint8_t CAM_reg_read(const uint8_t reg)
 {
     I2C1_start();
@@ -372,6 +379,7 @@ uint8_t CAM_reg_read(const uint8_t reg)
     return data;
 }
 
+// sets up everything required for the OV7670 camera and configures it for RGB565 colors and QVGA resolution
 void CAM_setup()
 {
     pin_setup(CAM_RST, PIN_MODE_OUTPUT, PIN_PULL_UP, PIN_SPEED_DEFAULT, PIN_TYPE_PUSHPULL);
@@ -390,6 +398,7 @@ void CAM_setup()
     CAM_reg_write_multiple(ov7670_rgb565_config);
 }
 
+// enables the DCMI's crop functionality
 void CAM_mcu_crop_en(const uint16_t x, const uint16_t y, const uint16_t w, const uint16_t h)
 {
     DCMI->CWSTRTR = x * 2 & DCMI_CWSTRT_HOFFCNT | y << DCMI_CWSTRT_VST_Pos & DCMI_CWSTRT_VST;
@@ -397,11 +406,16 @@ void CAM_mcu_crop_en(const uint16_t x, const uint16_t y, const uint16_t w, const
     DCMI->CR |= DCMI_CR_CROP;
 }
 
+// disables the DCMI's crop functionality
 void CAM_mcu_crop_off()
 {
     DCMI->CR &= ~DCMI_CR_CROP;
 }
 
+// sets up the DMA to transfer data from the DCMI to memory
+// buff2 is optional - set to 0 for a single buffer; else double buffering
+// buffSize should be even
+// buffers should be word-aligned as the
 void CAM_DMA_setup(uint16_t* buff1, uint16_t* buff2, const uint16_t buffSize)
 {
     DMA2_init();
@@ -426,23 +440,36 @@ void CAM_DMA_setup(uint16_t* buff1, uint16_t* buff2, const uint16_t buffSize)
     DMA_enable(DMA2_Stream7);
 }
 
+// resets the memory pointer to the initial value
+// use when using buffers larger than the scanned image or when the pointer somehow breaks
+void CAM_DMA_ptr_reset()
+{
+    DMA_disable(DMA2_Stream7);
+    DMA_enable(DMA2_Stream7);
+}
+
+// captures a single frame from the camera
 void CAM_snapshot()
 {
     DCMI->CR |= DCMI_CR_CM;
     DCMI->CR |= DCMI_CR_CAPTURE;
 }
 
+// starts continuous captures
 void CAM_continuous_start()
 {
     DCMI->CR &= ~DCMI_CR_CM;
     DCMI->CR |= DCMI_CR_CAPTURE;
 }
 
+// stops continuous capturing after the last frame transfer
 void CAM_continuous_stop()
 {
     DCMI->CR &= ~DCMI_CR_CAPTURE;
 }
 
+// busily waits for the image transfer to end
+// will get stuck when called after continuous_start; you have to call continuous_stop first
 void CAM_wait_for_capture_end()
 {
     while (DCMI->CR & DCMI_CR_CAPTURE){}
