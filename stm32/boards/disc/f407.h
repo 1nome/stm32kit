@@ -133,4 +133,10 @@
 /* cam setup */
 #define CAM_RST     (PC12)
 
+/* tft display */
+#define SPI2_SCK		(PB10)
+#define SPI2_MOSI		(PB15)
+#define TFT_RES         (PB14)
+#define TFT_DC          (PD10)
+
 #endif /* STM32_KIT_BOARDS_F407 */
