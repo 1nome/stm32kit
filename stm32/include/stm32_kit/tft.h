@@ -12,7 +12,7 @@
 #define STM32_KIT_TFT
 
 #include "pin.h"
-#include <stdbool.h>
+#include "disc/f407.h"
 
 // Potentially move these to config
 #define TFT_WIDTH 240
@@ -299,6 +299,20 @@ void TFT_push_color(const uint16_t color, int32_t count)
     }
 }
 
+// writes count colors from an array of size count to the display
+void TFT_push_colors(const uint16_t* colors, const int32_t count)
+{
+    SPI2_wait_for_idle();
+    io_set(TFT_DC, 1);
+    for (int i = 0; i < count; i++)
+    {
+        const uint8_t hi = colors[i] >> 8;
+        const uint8_t lo = colors[i];
+        SPI2_transmit(hi);
+        SPI2_transmit(lo);
+    }
+}
+
 // draws a vertical line
 void TFT_draw_vline(const int16_t x, const int16_t y, int16_t h, const uint16_t color)
 {
@@ -355,7 +369,7 @@ void TFT_draw_rectangle(const int16_t x, const int16_t y, int16_t w, int16_t h, 
 }
 
 // inverts colors on the display; for example, black -> white, red -> cyan etc.
-void TFT_invert_display(const bool enable)
+void TFT_invert_display(const uint8_t enable)
 {
     TFT_write_command(enable ? ST7789_INVOFF : ST7789_INVON);
 }

@@ -415,7 +415,7 @@ void CAM_mcu_crop_off()
 // sets up the DMA to transfer data from the DCMI to memory
 // buff2 is optional - set to 0 for a single buffer; else double buffering
 // buffSize should be even
-// buffers should be word-aligned as the
+// buffers should be word-aligned, else the image could be shifted
 void CAM_DMA_setup(uint16_t* buff1, uint16_t* buff2, const uint16_t buffSize)
 {
     DMA2_init();
@@ -473,6 +473,12 @@ void CAM_continuous_stop()
 void CAM_wait_for_capture_end()
 {
     while (DCMI->CR & DCMI_CR_CAPTURE){}
+}
+
+// returns what buffer is written to at the moment
+uint8_t CAM_DMA_get_ct()
+{
+    return DMA_get_ct(DMA2_Stream7);
 }
 
 #endif //STM32_KIT_CAM

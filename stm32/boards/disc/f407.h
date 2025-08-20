@@ -98,7 +98,7 @@
 
 /* I2C setup */
 #   define I2C1_SDA     (PB9)
-#if I2C_ALT1 == 1
+#if I2C_ALT == 0
 #   define I2C1_SCL     (PB6)
 #else
 #   define I2C1_SCL    (PB8)
