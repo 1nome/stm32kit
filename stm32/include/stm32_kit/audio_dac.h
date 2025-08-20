@@ -6,6 +6,8 @@
  *			Here, it is connected to I2C1 using PB9 and PB6
  *			It recieves audio data over I2S3 using PC12, PC10, PC7 and PA4
  *			It is also reset by setting PD4 low
+ *
+ * @attention Does not work with cam.h
  */
  
 #ifndef STM32_KIT_AUDIO_DAC
