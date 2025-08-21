@@ -139,4 +139,12 @@
 #define TFT_RES         (PB14)
 #define TFT_DC          (PD10)
 
+/* usb */
+#define USB_VBUS    (PA9)
+#define USB_ID      (PA10)
+#define USB_DMINUS  (PA11)
+#define USB_DPLUS   (PA12)
+#define USB_PWON    (PC0)
+#define USB_OC      (PD5)
+
 #endif /* STM32_KIT_BOARDS_F407 */
