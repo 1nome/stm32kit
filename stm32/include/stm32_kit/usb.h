@@ -39,7 +39,7 @@ void USB_core_init()
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_OTGINT; // unmask OTG int
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_MMISM; // unmask mode mismatch int
 
-    usb_mode = USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_CMOD; // what mode are we in
+    usb_mode = USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_CMOD; // read what mode are we in
 }
 
 #define USB_OTG_FS_HOST ((USB_OTG_HostTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_BASE)
@@ -85,7 +85,7 @@ void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, 
 }
 
 #define USB_OTG_FS_DEVICE ((USB_OTG_DeviceTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_DEVICE_BASE)
-#define USB_OTG_FS_DIEPCTL0 ((uint32_t *) USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE)
+#define USB_OTG_FS_IEP0 ((USB_OTG_INEndpointTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE)
 
 typedef enum
 {
@@ -117,7 +117,101 @@ void USB_device_init(const UBS_FS_MPSIZ max_packet_size)
     {
         return; // should never happen
     }
-    *USB_OTG_FS_DIEPCTL0 |= max_packet_size; // set maximum packet size
+    USB_OTG_FS_IEP0->DIEPCTL |= max_packet_size; // set maximum packet size
+}
+
+#define USB_OTG_FS_HC0 ((USB_OTG_HostChannelTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_CHANNEL_BASE)
+
+typedef enum
+{
+    DATA0 = 0,
+    DATA1,
+    DATA2,
+    MDATA
+} USB_DPID;
+
+// channels 0 - 7
+// transfer completed, channel halted, STALL response received, NAK response received,
+// ACK response received/transmitted, transaction error, babble error, frame overrun, data toggle error
+void USB_host_channel_init_ints(const uint8_t chan, const uint8_t xfrc, const uint8_t chh, const uint8_t stall,
+                                const uint8_t nak, const uint8_t ack, const uint8_t txerr, const uint8_t bberr,
+                                const uint8_t frmor, const uint8_t dterr)
+{
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_NPTXFEM; // enable np tx fifo empty int
+    USB_OTG_FS_HOST->HAINTMSK |= 1 << chan & USB_OTG_HAINTMSK_HAINTM; // enable ints from the selected channel
+
+    USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + chan;
+    if (xfrc) hc->HCINTMSK |= USB_OTG_HCINTMSK_XFRCM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_XFRCM;
+    if (chh) hc->HCINTMSK |= USB_OTG_HCINTMSK_CHHM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_CHHM;
+    if (stall) hc->HCINTMSK |= USB_OTG_HCINTMSK_STALLM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_STALLM;
+    if (nak) hc->HCINTMSK |= USB_OTG_HCINTMSK_NAKM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_NAKM;
+    if (ack) hc->HCINTMSK |= USB_OTG_HCINTMSK_ACKM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_ACKM;
+    if (txerr) hc->HCINTMSK |= USB_OTG_HCINTMSK_TXERRM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_TXERRM;
+    if (bberr) hc->HCINTMSK |= USB_OTG_HCINTMSK_BBERRM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_BBERRM;
+    if (frmor) hc->HCINTMSK |= USB_OTG_HCINTMSK_FRMORM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_FRMORM;
+    if (dterr) hc->HCINTMSK |= USB_OTG_HCINTMSK_DTERRM;
+    else hc->HCINTMSK &= ~USB_OTG_HCINTMSK_DTERRM;
+}
+
+typedef enum
+{
+    Control = 0,
+    Isochronous,
+    Bulk,
+    Interrupt
+} USB_EPTYP;
+
+typedef enum
+{
+    Out = 0,
+    In
+} USB_EPDIR;
+
+// channels 0-7
+void USB_host_channel_init_txsize(const uint8_t chan, const uint32_t transfer_size, const uint16_t packet_count, const USB_DPID data_pid)
+{
+    USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + chan;
+
+    hc->HCTSIZ &= ~(USB_OTG_HCTSIZ_DPID | USB_OTG_HCTSIZ_PKTCNT | USB_OTG_HCTSIZ_XFRSIZ);
+    hc->HCTSIZ |= transfer_size & USB_OTG_HCTSIZ_XFRSIZ;
+    hc->HCTSIZ |= packet_count << USB_OTG_HCTSIZ_PKTCNT_Pos & USB_OTG_HCTSIZ_PKTCNT;
+    hc->HCTSIZ |= data_pid << USB_OTG_HCTSIZ_DPID_Pos;
+}
+
+// channels 0-7
+// low speed device, endpoint number, device address
+void USB_host_channel_init_chars(const uint8_t chan, const USB_EPDIR dir, const USB_EPTYP type, const uint8_t lsdev,
+                                 const uint8_t epnum, const uint8_t dad)
+{
+    USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + chan;
+
+    hc->HCCHAR &= ~USB_OTG_HCCHAR_EPDIR;
+    hc->HCCHAR |= dir << USB_OTG_HCCHAR_EPDIR_Pos;
+    hc->HCCHAR &= ~USB_OTG_HCCHAR_EPTYP;
+    hc->HCCHAR |= type << USB_OTG_HCCHAR_EPTYP_Pos;
+    if (lsdev) hc->HCCHAR |= USB_OTG_HCCHAR_LSDEV;
+    else hc->HCCHAR &= ~USB_OTG_HCCHAR_LSDEV;
+    hc->HCCHAR &= ~USB_OTG_HCCHAR_EPNUM;
+    hc->HCCHAR |= epnum << USB_OTG_HCCHAR_EPNUM_Pos & USB_OTG_HCCHAR_EPNUM;
+    hc->HCCHAR &= ~USB_OTG_HCCHAR_DAD;
+    hc->HCCHAR |= dad << USB_OTG_HCCHAR_DAD_Pos & USB_OTG_HCCHAR_DAD;
+}
+
+void USB_host_channel_halt(const uint8_t chan, const uint8_t flush_requests)
+{
+    USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + chan;
+
+    if (flush_requests) hc->HCCHAR &= ~USB_OTG_HCCHAR_CHENA;
+
+    hc->HCCHAR |= USB_OTG_HCCHAR_CHDIS;
 }
 
 #endif //STM32_KIT_USB
