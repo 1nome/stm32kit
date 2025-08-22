@@ -24,7 +24,7 @@ uint32_t calc_trdt()
 
 uint8_t usb_mode;
 
-void usb_core_init()
+void USB_core_init()
 {
     USB_OTG_FS->GAHBCFG |= USB_OTG_GAHBCFG_GINT; // unmask global int
     USB_OTG_FS->GAHBCFG &= ~USB_OTG_GAHBCFG_PTXFELVL; // gen int @ half-fill level
@@ -49,20 +49,21 @@ typedef enum
 {
     Full_speed = 1,
     Low_speed = 2
-} Usb_speed;
+} USB_speed;
 
-Usb_speed usb_speed;
+USB_speed usb_speed;
 
 // sizes in terms of 32-bit words; min 16, max 256
-void usb_host_init(uint16_t rx_fifo_size, uint16_t np_tx_fifo_size, uint16_t np_tx_ram_start, uint16_t p_tx_fifo_size, uint16_t p_tx_ram_start)
+void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, const uint16_t np_tx_ram_start,
+                   const uint16_t p_tx_fifo_size, const uint16_t p_tx_ram_start)
 {
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_PRTIM; // unmask host port int
 
-    *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PPWR; // drive the vbus
+    *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PPWR; // drive the Vbus
     while (!(*USB_OTG_FS_HPRT & USB_OTG_HPRT_PCDET)){} // wait for a device to connect
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PCDET; // clear interrupt
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PRST; // start port reset
-    delay_ms(20); // waiting at least 10 millis
+    delay_ms(11); // waiting at least 10 millis
     *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PRST; // end port reset
     while (!(*USB_OTG_FS_HPRT & USB_OTG_HPRT_PENCHNG)){} // wait for port to change state
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PENCHNG; // clear interrupt
@@ -74,13 +75,49 @@ void usb_host_init(uint16_t rx_fifo_size, uint16_t np_tx_fifo_size, uint16_t np_
         USB_OTG_FS_HOST->HCFG &= ~USB_OTG_HCFG_FSLSPCS;
         USB_OTG_FS_HOST->HCFG |= usb_speed & USB_OTG_HCFG_FSLSPCS; // set new speed
         *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PRST; // start port reset
-        delay_ms(20); // waiting at least 10 millis
+        delay_ms(11); // waiting at least 10 millis
         *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PRST; // end port reset
     }
 
     USB_OTG_FS->GRXFSIZ = rx_fifo_size;
     USB_OTG_FS->DIEPTXF0_HNPTXFSIZ = np_tx_fifo_size << USB_OTG_NPTXFD_Pos | np_tx_ram_start;
     USB_OTG_FS->HPTXFSIZ = p_tx_fifo_size << USB_OTG_HPTXFSIZ_PTXFD_Pos | p_tx_ram_start;
+}
+
+#define USB_OTG_FS_DEVICE ((USB_OTG_DeviceTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_DEVICE_BASE)
+#define USB_OTG_FS_DIEPCTL0 ((uint32_t *) USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE)
+
+typedef enum
+{
+    Max64B = 0,
+    Max32B,
+    Max16B,
+    Max8B,
+} UBS_FS_MPSIZ;
+
+void USB_device_init(const UBS_FS_MPSIZ max_packet_size)
+{
+    USB_OTG_FS_DEVICE->DCFG |= USB_OTG_DCFG_DSPD; // full speed
+    USB_OTG_FS_DEVICE->DCFG &= ~USB_OTG_DCFG_NZLSOHSK; // todo: potentially make a parameter
+    // see the datasheet for more info
+
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_USBRST; // enable USB reset int
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_ENUMDNEM; // enable enumeration done int
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_ESUSPM; // enable early suspend int
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_USBSUSPM; // enable USB suspend int
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_SOFM; // enable SOF int
+
+    USB_OTG_FS->GCCFG |= USB_OTG_GCCFG_VBUSBSEN; // enable Vbus sensing in b device mode
+
+    while (!(USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_USBRST)){} // wait for reset
+    USB_OTG_FS->GINTSTS |= USB_OTG_GINTSTS_USBRST; // clear interrupt
+
+    while (!(USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_ENUMDNE)){} // wait for enumeration to finish
+    if ((USB_OTG_FS_DEVICE->DSTS & USB_OTG_DSTS_ENUMSPD) != USB_OTG_DSTS_ENUMSPD) // read enumeration speed
+    {
+        return; // should never happen
+    }
+    *USB_OTG_FS_DIEPCTL0 |= max_packet_size; // set maximum packet size
 }
 
 #endif //STM32_KIT_USB
