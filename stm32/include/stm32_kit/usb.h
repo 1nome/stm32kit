@@ -186,6 +186,8 @@ void USB_host_channel_init_txsize(const uint8_t chan, const uint32_t transfer_si
     hc->HCTSIZ |= data_pid << USB_OTG_HCTSIZ_DPID_Pos;
 }
 
+USB_EPTYP usb_types[8];
+
 // channels 0-7
 // low speed device, endpoint number, device address
 void USB_host_channel_init_chars(const uint8_t chan, const USB_EPDIR dir, const USB_EPTYP type, const uint8_t lsdev,
@@ -197,6 +199,7 @@ void USB_host_channel_init_chars(const uint8_t chan, const USB_EPDIR dir, const 
     hc->HCCHAR |= dir << USB_OTG_HCCHAR_EPDIR_Pos;
     hc->HCCHAR &= ~USB_OTG_HCCHAR_EPTYP;
     hc->HCCHAR |= type << USB_OTG_HCCHAR_EPTYP_Pos;
+    usb_types[chan] = type; // storing channel types so they don't have to be read from registers
     if (lsdev) hc->HCCHAR |= USB_OTG_HCCHAR_LSDEV;
     else hc->HCCHAR &= ~USB_OTG_HCCHAR_LSDEV;
     hc->HCCHAR &= ~USB_OTG_HCCHAR_EPNUM;
@@ -212,6 +215,82 @@ void USB_host_channel_halt(const uint8_t chan, const uint8_t flush_requests)
     if (flush_requests) hc->HCCHAR &= ~USB_OTG_HCCHAR_CHENA;
 
     hc->HCCHAR |= USB_OTG_HCCHAR_CHDIS;
+}
+
+typedef enum
+{
+    USB_res_ok = 0,
+    USB_res_noSpace,
+    USB_res_emptyQueue,
+    USB_res_notIn,
+    USB_res_noData
+} USB_result;
+
+USB_result USB_host_write_packet(const uint8_t chan, const uint8_t* data, const uint16_t len)
+{
+    uint16_t space;
+    uint8_t qspace;
+    if (usb_types[chan] == Control || usb_types[chan] == Bulk)
+    {
+        space = USB_OTG_FS->HNPTXSTS & USB_OTG_GNPTXSTS_NPTXFSAV;
+        qspace = (USB_OTG_FS->HNPTXSTS & USB_OTG_GNPTXSTS_NPTQXSAV) >> USB_OTG_GNPTXSTS_NPTQXSAV_Pos;
+    }
+    else
+    {
+        space = USB_OTG_FS_HOST->HPTXSTS & USB_OTG_HPTXSTS_PTXFSAVL;
+        qspace = (USB_OTG_FS_HOST->HPTXSTS & USB_OTG_HPTXSTS_PTXQSAV) >> USB_OTG_HPTXSTS_PTXQSAV_Pos;
+    }
+
+    const uint16_t n32 = (len + 3) / 4;
+
+    if (space < n32 || qspace == 0)
+    {
+        return USB_res_noSpace;
+    }
+
+    uint32_t* fifo = (uint32_t*)(USB_OTG_FS_PERIPH_BASE + USB_OTG_FIFO_BASE + USB_OTG_FIFO_SIZE * chan);
+
+    for (uint16_t i = 0; i < n32; i++, data += 4)
+    {
+        *fifo = *(uint32_t*)data;
+    }
+
+    return USB_res_ok;
+}
+
+// data needs to have enough space for a max size packet
+USB_result USB_host_read_packet(const uint8_t chan, uint8_t* data, uint16_t* len)
+{
+    if (!USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_RXFLVL)
+    {
+        return USB_res_emptyQueue;
+    }
+
+    USB_OTG_FS->GINTMSK &= ~USB_OTG_GINTMSK_RXFLVLM;
+
+    const uint32_t packet_info = USB_OTG_FS->GRXSTSP;
+    if (packet_info & USB_OTG_GRXSTSP_PKTSTS != 2 << USB_OTG_GRXSTSP_PKTSTS_Pos)
+    {
+        USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_RXFLVLM;
+        return USB_res_notIn;
+    }
+    *len = (packet_info & USB_OTG_GRXSTSP_BCNT) >> USB_OTG_GRXSTSP_BCNT_Pos;
+    if (*len == 0)
+    {
+        USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_RXFLVLM;
+        return USB_res_noData;
+    }
+
+    const uint16_t n32 = (*len + 3) / 4;
+    const uint32_t* fifo = (uint32_t*)(USB_OTG_FS_PERIPH_BASE + USB_OTG_FIFO_BASE + USB_OTG_FIFO_SIZE * chan);
+
+    for (uint16_t i = 0; i < n32; i++, data += 4)
+    {
+        *(uint32_t*)data = *fifo;
+    }
+
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_RXFLVLM;
+    return USB_res_ok;
 }
 
 #endif //STM32_KIT_USB
