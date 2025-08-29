@@ -12,6 +12,8 @@
 
 #include "chrono.h"
 #include "disc/f407.h"
+#include "pin.h"
+#include "i2c_lcd.h" // for debug purposes
 
 uint32_t calc_trdt()
 {
@@ -30,8 +32,8 @@ void USB_core_init()
     USB_OTG_FS->GAHBCFG &= ~USB_OTG_GAHBCFG_PTXFELVL; // gen int @ half-fill level
     USB_OTG_FS->GAHBCFG &= ~USB_OTG_GAHBCFG_TXFELVL; // gen int @ half-fill level
 
-    USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_HNPCAP; // hnp on
-    USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_SRPCAP; // srp on
+    // USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_HNPCAP; // hnp on
+    // USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_SRPCAP; // srp on
     USB_OTG_FS->GUSBCFG &= ~USB_OTG_GUSBCFG_TRDT;
     USB_OTG_FS->GUSBCFG |= calc_trdt(); // turnaround time
     USB_OTG_FS->GUSBCFG |= 2; // timeout calibration (didn't test, think 2 is neat)
@@ -42,8 +44,9 @@ void USB_core_init()
     usb_mode = USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_CMOD; // read what mode are we in
 }
 
-#define USB_OTG_FS_HOST ((USB_OTG_HostTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_BASE)
-#define USB_OTG_FS_HPRT ((uint32_t *) USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_PORT_BASE)
+#define USB_OTG_FS_HOST ((USB_OTG_HostTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_BASE))
+
+#define USB_OTG_FS_HPRT ((__IO uint32_t *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_PORT_BASE))
 
 typedef enum
 {
@@ -53,12 +56,15 @@ typedef enum
 
 USB_speed usb_speed;
 
-// sizes in terms of 32-bit words; min 16, max 256
+// sizes min 16, max 256, in terms of 32-bit words
+// np_tx_ram_start >= rx_fifo_size,
+// p_tx_ram_start >= np_tx_ram_start + np_tx_ram_size
+// 320 words (1280B) > p_tx_ram_start + p_tx_ram_size
 void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, const uint16_t np_tx_ram_start,
                    const uint16_t p_tx_fifo_size, const uint16_t p_tx_ram_start)
 {
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_PRTIM; // unmask host port int
-
+    USB_OTG_FS_HOST->HCFG |= USB_OTG_HCFG_FSLSPCS_0; // FS host mode
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PPWR; // drive the Vbus
     while (!(*USB_OTG_FS_HPRT & USB_OTG_HPRT_PCDET)){} // wait for a device to connect
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PCDET; // clear interrupt
@@ -84,8 +90,8 @@ void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, 
     USB_OTG_FS->HPTXFSIZ = p_tx_fifo_size << USB_OTG_HPTXFSIZ_PTXFD_Pos | p_tx_ram_start;
 }
 
-#define USB_OTG_FS_DEVICE ((USB_OTG_DeviceTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_DEVICE_BASE)
-#define USB_OTG_FS_IEP0 ((USB_OTG_INEndpointTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE)
+#define USB_OTG_FS_DEVICE ((USB_OTG_DeviceTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_DEVICE_BASE))
+#define USB_OTG_FS_IEP0 ((USB_OTG_INEndpointTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE))
 
 typedef enum
 {
@@ -120,14 +126,14 @@ void USB_device_init(const UBS_FS_MPSIZ max_packet_size)
     USB_OTG_FS_IEP0->DIEPCTL |= max_packet_size; // set maximum packet size
 }
 
-#define USB_OTG_FS_HC0 ((USB_OTG_HostChannelTypeDef *) USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_CHANNEL_BASE)
+#define USB_OTG_FS_HC0 ((USB_OTG_HostChannelTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_CHANNEL_BASE))
 
 typedef enum
 {
     DATA0 = 0,
     DATA1,
     DATA2,
-    MDATA
+    MDATA_SETUP
 } USB_DPID;
 
 // channels 0 - 7
@@ -261,7 +267,7 @@ USB_result USB_host_write_packet(const uint8_t chan, const uint8_t* data, const 
 // data needs to have enough space for a max size packet
 USB_result USB_host_read_packet(const uint8_t chan, uint8_t* data, uint16_t* len)
 {
-    if (!USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_RXFLVL)
+    if (!(USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_RXFLVL))
     {
         return USB_res_emptyQueue;
     }
@@ -269,7 +275,7 @@ USB_result USB_host_read_packet(const uint8_t chan, uint8_t* data, uint16_t* len
     USB_OTG_FS->GINTMSK &= ~USB_OTG_GINTMSK_RXFLVLM;
 
     const uint32_t packet_info = USB_OTG_FS->GRXSTSP;
-    if (packet_info & USB_OTG_GRXSTSP_PKTSTS != 2 << USB_OTG_GRXSTSP_PKTSTS_Pos)
+    if ((packet_info & USB_OTG_GRXSTSP_PKTSTS) != 2 << USB_OTG_GRXSTSP_PKTSTS_Pos)
     {
         USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_RXFLVLM;
         return USB_res_notIn;
@@ -291,6 +297,56 @@ USB_result USB_host_read_packet(const uint8_t chan, uint8_t* data, uint16_t* len
 
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_RXFLVLM;
     return USB_res_ok;
+}
+
+void USB_phy_init()
+{
+    pin_setup_af(USB_VBUS, PIN_MODE_AF, PIN_PULL_NONE, PIN_SPEED_VERYHIGH, PIN_TYPE_PUSHPULL, PIN_AF10);
+    pin_setup_af(USB_ID, PIN_MODE_AF, PIN_PULL_UP, PIN_SPEED_VERYHIGH, PIN_TYPE_OPENDRAIN, PIN_AF10);
+    pin_setup_af(USB_DMINUS, PIN_MODE_AF, PIN_PULL_NONE, PIN_SPEED_VERYHIGH, PIN_TYPE_PUSHPULL, PIN_AF10);
+    pin_setup_af(USB_DPLUS, PIN_MODE_AF, PIN_PULL_NONE, PIN_SPEED_VERYHIGH, PIN_TYPE_PUSHPULL, PIN_AF10);
+
+    RCC->AHB2ENR |= RCC_AHB2ENR_OTGFSEN;
+
+    pin_setup(USB_PWON, PIN_MODE_OUTPUT, PIN_PULL_NONE, PIN_SPEED_HIGH, PIN_TYPE_PUSHPULL);
+    io_set(USB_PWON, 1); // reset
+    delay_ms(200);
+    io_set(USB_PWON, 0);
+
+    pin_setup(USB_OC, PIN_MODE_INPUT, PIN_PULL_NONE, PIN_SPEED_HIGH, PIN_TYPE_PUSHPULL);
+}
+
+void EXTI9_5_IRQHandler(void)
+{
+    io_set(USB_PWON, 1); // disable vbus generation
+    *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PPWR;
+
+    EXTI->PR |= EXTI_PR_PR5;
+
+    I2C_LCD_set(LCD_LINE1);
+    I2C_LCD_print("Overcurrent");
+}
+
+void OTG_FS_IRQHandler(void)
+{
+
+    I2C_LCD_set(LCD_LINE2);
+    I2C_LCD_print("USB Irq");
+}
+
+void USB_ints_init()
+{
+    NVIC_SetPriority(SysTick_IRQn, 1); // needed so delays work inside our handlers
+
+    NVIC_SetPriority(OTG_FS_IRQn, 3);
+    // NVIC_EnableIRQ(OTG_FS_IRQn);
+
+    RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
+    SYSCFG->EXTICR[1] |= SYSCFG_EXTICR2_EXTI5_PD;
+    EXTI->RTSR |= EXTI_RTSR_TR5;
+    EXTI->IMR |= EXTI_IMR_MR5;
+    NVIC_SetPriority(EXTI9_5_IRQn, 2);
+    NVIC_EnableIRQ(EXTI9_5_IRQn);
 }
 
 #endif //STM32_KIT_USB
