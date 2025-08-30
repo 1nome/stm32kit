@@ -11,6 +11,7 @@
 
 #include "lcd.h"
 #include "i2c.h"
+#include <stdio.h>
 
 uint8_t I2C_LCD_addr = 0;
 
