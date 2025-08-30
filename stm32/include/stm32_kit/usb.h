@@ -15,6 +15,57 @@
 #include "pin.h"
 #include "i2c_lcd.h" // for debug purposes
 
+#define USB_OTG_FS_HOST ((USB_OTG_HostTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_BASE))
+#define USB_OTG_FS_HPRT ((__IO uint32_t *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_PORT_BASE))
+#define USB_OTG_FS_DEVICE ((USB_OTG_DeviceTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_DEVICE_BASE))
+#define USB_OTG_FS_IEP0 ((USB_OTG_INEndpointTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE))
+#define USB_OTG_FS_HC0 ((USB_OTG_HostChannelTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_CHANNEL_BASE))
+
+void usb_debug_write(const char* str, const uint8_t add)
+{
+    if (!add)
+    {
+        I2C_LCD_set(LCD_LINE2);
+        I2C_LCD_print("                ");
+        I2C_LCD_set(LCD_LINE2);
+    }
+    I2C_LCD_print(str);
+}
+
+volatile struct
+{
+    uint8_t pcdet : 1;
+    uint8_t penchng : 1;
+} usb_ints;
+
+void USB_handle_port()
+{
+    usb_debug_write("HPRT-", 1);
+    if (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PCDET)
+    {
+        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PCDET; // clear by writing 1
+        usb_ints.pcdet = 1;
+        usb_debug_write("PCDET", 1);
+    }
+    if (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PENCHNG)
+    {
+        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PENCHNG; // clear by writing 1
+        usb_ints.penchng = 1;
+        usb_debug_write("PENCHNG", 1);
+    }
+}
+
+void OTG_FS_IRQHandler(void)
+{
+    io_set(LED_IN_1, io_get(LED_IN_1) ? 0 : 1);
+    usb_debug_write("USB-", 0);
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_HPRTINT)
+    {
+        USB_handle_port();
+    }
+
+}
+
 uint32_t calc_trdt()
 {
     if (SystemCoreClock < 32000000)
@@ -44,10 +95,6 @@ void USB_core_init()
     usb_mode = USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_CMOD; // read what mode are we in
 }
 
-#define USB_OTG_FS_HOST ((USB_OTG_HostTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_BASE))
-
-#define USB_OTG_FS_HPRT ((__IO uint32_t *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_PORT_BASE))
-
 typedef enum
 {
     Full_speed = 1,
@@ -66,13 +113,13 @@ void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, 
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_PRTIM; // unmask host port int
     USB_OTG_FS_HOST->HCFG |= USB_OTG_HCFG_FSLSPCS_0; // FS host mode
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PPWR; // drive the Vbus
-    while (!(*USB_OTG_FS_HPRT & USB_OTG_HPRT_PCDET)){} // wait for a device to connect
-    *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PCDET; // clear interrupt
+    while (!usb_ints.pcdet){} // wait for a device to connect
+    usb_ints.pcdet = 0; // clear interrupt
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PRST; // start port reset
     delay_ms(11); // waiting at least 10 millis
     *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PRST; // end port reset
-    while (!(*USB_OTG_FS_HPRT & USB_OTG_HPRT_PENCHNG)){} // wait for port to change state
-    *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PENCHNG; // clear interrupt
+    while (!usb_ints.penchng){} // wait for port to change state
+    usb_ints.penchng = 0; // clear interrupt
     usb_speed = (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PSPD) >> USB_OTG_HPRT_PSPD_Pos; // read speed
 
     const uint8_t prev_speed = USB_OTG_FS_HOST->HCFG & USB_OTG_HCFG_FSLSPCS; // get curr port speed
@@ -89,9 +136,6 @@ void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, 
     USB_OTG_FS->DIEPTXF0_HNPTXFSIZ = np_tx_fifo_size << USB_OTG_NPTXFD_Pos | np_tx_ram_start;
     USB_OTG_FS->HPTXFSIZ = p_tx_fifo_size << USB_OTG_HPTXFSIZ_PTXFD_Pos | p_tx_ram_start;
 }
-
-#define USB_OTG_FS_DEVICE ((USB_OTG_DeviceTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_DEVICE_BASE))
-#define USB_OTG_FS_IEP0 ((USB_OTG_INEndpointTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE))
 
 typedef enum
 {
@@ -125,8 +169,6 @@ void USB_device_init(const UBS_FS_MPSIZ max_packet_size)
     }
     USB_OTG_FS_IEP0->DIEPCTL |= max_packet_size; // set maximum packet size
 }
-
-#define USB_OTG_FS_HC0 ((USB_OTG_HostChannelTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_CHANNEL_BASE))
 
 typedef enum
 {
@@ -319,19 +361,11 @@ void USB_phy_init()
 void EXTI9_5_IRQHandler(void)
 {
     io_set(USB_PWON, 1); // disable vbus generation
-    *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PPWR;
+    *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PPWR; // disable port power
 
-    EXTI->PR |= EXTI_PR_PR5;
+    EXTI->PR |= EXTI_PR_PR5; // clear int
 
-    I2C_LCD_set(LCD_LINE1);
-    I2C_LCD_print("Overcurrent");
-}
-
-void OTG_FS_IRQHandler(void)
-{
-
-    I2C_LCD_set(LCD_LINE2);
-    I2C_LCD_print("USB Irq");
+    usb_debug_write("Overcurrent", 0);
 }
 
 void USB_ints_init()
@@ -339,12 +373,12 @@ void USB_ints_init()
     NVIC_SetPriority(SysTick_IRQn, 1); // needed so delays work inside our handlers
 
     NVIC_SetPriority(OTG_FS_IRQn, 3);
-    // NVIC_EnableIRQ(OTG_FS_IRQn);
+    NVIC_EnableIRQ(OTG_FS_IRQn);
 
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
-    SYSCFG->EXTICR[1] |= SYSCFG_EXTICR2_EXTI5_PD;
-    EXTI->RTSR |= EXTI_RTSR_TR5;
-    EXTI->IMR |= EXTI_IMR_MR5;
+    SYSCFG->EXTICR[1] |= SYSCFG_EXTICR2_EXTI5_PD; // exti chan 5 source is port d
+    EXTI->RTSR |= EXTI_RTSR_TR5; // triggered on rising edge
+    EXTI->IMR |= EXTI_IMR_MR5; // enable int
     NVIC_SetPriority(EXTI9_5_IRQn, 2);
     NVIC_EnableIRQ(EXTI9_5_IRQn);
 }
