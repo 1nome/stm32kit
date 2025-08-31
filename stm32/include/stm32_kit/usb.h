@@ -21,6 +21,8 @@
 #define USB_OTG_FS_IEP0 ((USB_OTG_INEndpointTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE))
 #define USB_OTG_FS_HC0 ((USB_OTG_HostChannelTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_CHANNEL_BASE))
 
+void USB_host_channel_halt(uint8_t chan, uint8_t flush_requests);
+
 void usb_debug_write(const char* str, const uint8_t add)
 {
     if (!add)
@@ -32,26 +34,72 @@ void usb_debug_write(const char* str, const uint8_t add)
     I2C_LCD_print(str);
 }
 
-volatile struct
+enum
 {
-    uint8_t pcdet : 1;
-    uint8_t penchng : 1;
-} usb_ints;
+    USB_Idle,
+    USB_EnumStart,
+    USB_EnumDone
+} USB_state;
+
+typedef enum
+{
+    Full_speed = 1,
+    Low_speed = 2
+} USB_speed;
+
+USB_speed usb_speed;
 
 void USB_handle_port()
 {
+    uint8_t reset = 0;
+    uint8_t clear_pcdet = 0;
+    uint8_t clear_penchng = 0;
     usb_debug_write("HPRT-", 1);
     if (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PCDET)
     {
-        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PCDET; // clear by writing 1
-        usb_ints.pcdet = 1;
+        clear_pcdet = 1;
+        reset = 1;
         usb_debug_write("PCDET", 1);
     }
     if (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PENCHNG)
     {
-        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PENCHNG; // clear by writing 1
-        usb_ints.penchng = 1;
+        clear_penchng = 1;
+        if (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PENA) // if port is enabled
+        {
+            io_set(LED_IN_0, 1);
+            USB_state = USB_EnumDone;
+            usb_speed = (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PSPD) >> USB_OTG_HPRT_PSPD_Pos; // read speed
+            if (usb_speed == Low_speed || usb_speed == Full_speed)
+            {
+                USB_OTG_FS_HOST->HFIR = usb_speed == Low_speed ? 6000 : 48000;
+                if ((USB_OTG_FS_HOST->HCFG & USB_OTG_HCFG_FSLSPCS) != usb_speed) // if speeds mismatch
+                {
+                    USB_OTG_FS_HOST->HCFG &= ~USB_OTG_HCFG_FSLSPCS;
+                    USB_OTG_FS_HOST->HCFG |= usb_speed & USB_OTG_HCFG_FSLSPCS; // set the correct one
+                    reset = 1;
+                }
+            }
+            else
+            {
+                reset = 1;
+            }
+        }
         usb_debug_write("PENCHNG", 1);
+    }
+    if (reset)
+    {
+        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PRST; // start port reset
+        delay_ms(11); // waiting at least 10 millis
+        *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PRST; // end port reset
+        delay_ms(20); // waiting at least 10 millis
+    }
+    if (clear_pcdet)
+    {
+        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PCDET; // clear by writing 1
+    }
+    if (clear_penchng)
+    {
+        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PENCHNG; // clear by writing 1
     }
 }
 
@@ -63,7 +111,15 @@ void OTG_FS_IRQHandler(void)
     {
         USB_handle_port();
     }
-
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_DISCINT)
+    {
+        usb_debug_write("DISCINT", 1);
+        for (uint8_t i = 0; i < 8; i++)
+        {
+            USB_host_channel_halt(i, 0);
+        }
+        USB_OTG_FS->GINTSTS |= USB_OTG_GINTSTS_DISCINT;
+    }
 }
 
 uint32_t calc_trdt()
@@ -95,14 +151,6 @@ void USB_core_init()
     usb_mode = USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_CMOD; // read what mode are we in
 }
 
-typedef enum
-{
-    Full_speed = 1,
-    Low_speed = 2
-} USB_speed;
-
-USB_speed usb_speed;
-
 // sizes min 16, max 256, in terms of 32-bit words
 // np_tx_ram_start >= rx_fifo_size,
 // p_tx_ram_start >= np_tx_ram_start + np_tx_ram_size
@@ -110,27 +158,14 @@ USB_speed usb_speed;
 void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, const uint16_t np_tx_ram_start,
                    const uint16_t p_tx_fifo_size, const uint16_t p_tx_ram_start)
 {
+    USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_FHMOD; // force host
+    delay_ms(26); // wait at least 25 millis
+
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_PRTIM; // unmask host port int
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_DISCINT; // unmask device disconnect int
+
     USB_OTG_FS_HOST->HCFG |= USB_OTG_HCFG_FSLSPCS_0; // FS host mode
     *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PPWR; // drive the Vbus
-    while (!usb_ints.pcdet){} // wait for a device to connect
-    usb_ints.pcdet = 0; // clear interrupt
-    *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PRST; // start port reset
-    delay_ms(11); // waiting at least 10 millis
-    *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PRST; // end port reset
-    while (!usb_ints.penchng){} // wait for port to change state
-    usb_ints.penchng = 0; // clear interrupt
-    usb_speed = (*USB_OTG_FS_HPRT & USB_OTG_HPRT_PSPD) >> USB_OTG_HPRT_PSPD_Pos; // read speed
-
-    const uint8_t prev_speed = USB_OTG_FS_HOST->HCFG & USB_OTG_HCFG_FSLSPCS; // get curr port speed
-    if (prev_speed != usb_speed)
-    {
-        USB_OTG_FS_HOST->HCFG &= ~USB_OTG_HCFG_FSLSPCS;
-        USB_OTG_FS_HOST->HCFG |= usb_speed & USB_OTG_HCFG_FSLSPCS; // set new speed
-        *USB_OTG_FS_HPRT |= USB_OTG_HPRT_PRST; // start port reset
-        delay_ms(11); // waiting at least 10 millis
-        *USB_OTG_FS_HPRT &= ~USB_OTG_HPRT_PRST; // end port reset
-    }
 
     USB_OTG_FS->GRXFSIZ = rx_fifo_size;
     USB_OTG_FS->DIEPTXF0_HNPTXFSIZ = np_tx_fifo_size << USB_OTG_NPTXFD_Pos | np_tx_ram_start;
@@ -143,9 +178,9 @@ typedef enum
     Max32B,
     Max16B,
     Max8B,
-} UBS_FS_MPSIZ;
+} UBS_FS_DEVICE_MPSIZ;
 
-void USB_device_init(const UBS_FS_MPSIZ max_packet_size)
+void USB_device_init(const UBS_FS_DEVICE_MPSIZ max_packet_size)
 {
     USB_OTG_FS_DEVICE->DCFG |= USB_OTG_DCFG_DSPD; // full speed
     USB_OTG_FS_DEVICE->DCFG &= ~USB_OTG_DCFG_NZLSOHSK; // todo: potentially make a parameter
@@ -185,7 +220,8 @@ void USB_host_channel_init_ints(const uint8_t chan, const uint8_t xfrc, const ui
                                 const uint8_t nak, const uint8_t ack, const uint8_t txerr, const uint8_t bberr,
                                 const uint8_t frmor, const uint8_t dterr)
 {
-    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_NPTXFEM; // enable np tx fifo empty int
+    // USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_NPTXFEM; // enable np tx fifo empty int
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_HCIM; // enable host channels ints
     USB_OTG_FS_HOST->HAINTMSK |= 1 << chan & USB_OTG_HAINTMSK_HAINTM; // enable ints from the selected channel
 
     USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + chan;
@@ -237,9 +273,9 @@ void USB_host_channel_init_txsize(const uint8_t chan, const uint32_t transfer_si
 USB_EPTYP usb_types[8];
 
 // channels 0-7
-// low speed device, endpoint number, device address
+// low speed device, endpoint number, device address, max packet size
 void USB_host_channel_init_chars(const uint8_t chan, const USB_EPDIR dir, const USB_EPTYP type, const uint8_t lsdev,
-                                 const uint8_t epnum, const uint8_t dad)
+                                 const uint8_t epnum, const uint8_t dad, const uint16_t mpsiz)
 {
     USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + chan;
 
@@ -254,6 +290,8 @@ void USB_host_channel_init_chars(const uint8_t chan, const USB_EPDIR dir, const 
     hc->HCCHAR |= epnum << USB_OTG_HCCHAR_EPNUM_Pos & USB_OTG_HCCHAR_EPNUM;
     hc->HCCHAR &= ~USB_OTG_HCCHAR_DAD;
     hc->HCCHAR |= dad << USB_OTG_HCCHAR_DAD_Pos & USB_OTG_HCCHAR_DAD;
+    hc->HCCHAR &= ~USB_OTG_HCCHAR_MPSIZ;
+    hc->HCCHAR |= mpsiz << USB_OTG_HCCHAR_MPSIZ_Pos & USB_OTG_HCCHAR_MPSIZ;
 }
 
 void USB_host_channel_halt(const uint8_t chan, const uint8_t flush_requests)
@@ -263,6 +301,17 @@ void USB_host_channel_halt(const uint8_t chan, const uint8_t flush_requests)
     if (flush_requests) hc->HCCHAR &= ~USB_OTG_HCCHAR_CHENA;
 
     hc->HCCHAR |= USB_OTG_HCCHAR_CHDIS;
+}
+
+// for periodic transactions, set odd_frame to transfer on an odd frame
+void USB_host_channel_enable(const uint8_t chan, const uint8_t odd_frame)
+{
+    USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + chan;
+
+    if (odd_frame) hc->HCCHAR |= USB_OTG_HCCHAR_ODDFRM;
+    else hc->HCCHAR &= ~USB_OTG_HCCHAR_ODDFRM;
+
+    hc->HCCHAR |= USB_OTG_HCCHAR_CHENA;
 }
 
 typedef enum
@@ -296,7 +345,7 @@ USB_result USB_host_write_packet(const uint8_t chan, const uint8_t* data, const 
         return USB_res_noSpace;
     }
 
-    uint32_t* fifo = (uint32_t*)(USB_OTG_FS_PERIPH_BASE + USB_OTG_FIFO_BASE + USB_OTG_FIFO_SIZE * chan);
+    volatile uint32_t* fifo = (volatile uint32_t*)(USB_OTG_FS_PERIPH_BASE + USB_OTG_FIFO_BASE + USB_OTG_FIFO_SIZE * chan);
 
     for (uint16_t i = 0; i < n32; i++, data += 4)
     {
@@ -365,6 +414,7 @@ void EXTI9_5_IRQHandler(void)
 
     EXTI->PR |= EXTI_PR_PR5; // clear int
 
+    io_set(LED_IN_3, 1);
     usb_debug_write("Overcurrent", 0);
 }
 
