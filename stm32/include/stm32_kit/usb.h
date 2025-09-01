@@ -14,6 +14,7 @@
 #include "disc/f407.h"
 #include "pin.h"
 #include "i2c_lcd.h" // for debug purposes
+#include "uart.h"
 
 #define USB_OTG_FS_HOST ((USB_OTG_HostTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_BASE))
 #define USB_OTG_FS_HPRT ((__IO uint32_t *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_PORT_BASE))
@@ -27,11 +28,9 @@ void usb_debug_write(const char* str, const uint8_t add)
 {
     if (!add)
     {
-        I2C_LCD_set(LCD_LINE2);
-        I2C_LCD_print("                ");
-        I2C_LCD_set(LCD_LINE2);
+        UART_write("\r\n", 2);
     }
-    I2C_LCD_print(str);
+    UART_write(str, strlen(str));
 }
 
 enum
@@ -103,6 +102,67 @@ void USB_handle_port()
     }
 }
 
+void USB_handle_host()
+{
+    usb_debug_write("HCINT", 1);
+    char id[] = "x-";
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        if (!(USB_OTG_FS_HOST->HAINT & 1 << i))
+        {
+            continue;
+        }
+        id[0] = '0' + i;
+        usb_debug_write(id, 1);
+        USB_OTG_HostChannelTypeDef* hc = USB_OTG_FS_HC0 + i;
+        if (hc->HCINT & USB_OTG_HCINT_XFRC)
+        {
+            usb_debug_write("XFRC", 1);
+            hc->HCINT |= USB_OTG_HCINT_XFRC;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_CHH)
+        {
+            usb_debug_write("CHH", 1);
+            hc->HCINT |= USB_OTG_HCINT_CHH;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_STALL)
+        {
+            usb_debug_write("STALL", 1);
+            hc->HCINT |= USB_OTG_HCINT_STALL;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_NAK)
+        {
+            usb_debug_write("NAK", 1);
+            hc->HCINT |= USB_OTG_HCINT_NAK;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_ACK)
+        {
+            usb_debug_write("ACK", 1);
+            hc->HCINT |= USB_OTG_HCINT_ACK;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_TXERR)
+        {
+            usb_debug_write("TXERR", 1);
+            hc->HCINT |= USB_OTG_HCINT_TXERR;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_BBERR)
+        {
+            usb_debug_write("BBERR", 1);
+            hc->HCINT |= USB_OTG_HCINT_BBERR;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_FRMOR)
+        {
+            usb_debug_write("FRMOR", 1);
+            hc->HCINT |= USB_OTG_HCINT_FRMOR;
+        }
+        if (hc->HCINT & USB_OTG_HCINT_DTERR)
+        {
+            usb_debug_write("DTERR", 1);
+            hc->HCINT |= USB_OTG_HCINT_DTERR;
+        }
+    }
+}
+
 void OTG_FS_IRQHandler(void)
 {
     io_set(LED_IN_1, io_get(LED_IN_1) ? 0 : 1);
@@ -119,6 +179,18 @@ void OTG_FS_IRQHandler(void)
             USB_host_channel_halt(i, 0);
         }
         USB_OTG_FS->GINTSTS |= USB_OTG_GINTSTS_DISCINT;
+    }
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_OTGINT)
+    {
+        usb_debug_write("OTGINT", 1);
+    }
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_MMIS)
+    {
+        usb_debug_write("MMIS", 1);
+    }
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_HCINT)
+    {
+        USB_handle_host();
     }
 }
 
