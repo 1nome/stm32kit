@@ -19,8 +19,11 @@
 #define USB_OTG_FS_HOST ((USB_OTG_HostTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_BASE))
 #define USB_OTG_FS_HPRT ((__IO uint32_t *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_PORT_BASE))
 #define USB_OTG_FS_DEVICE ((USB_OTG_DeviceTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_DEVICE_BASE))
-#define USB_OTG_FS_IEP0 ((USB_OTG_INEndpointTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE))
+#define USB_OTG_FS_DIEP0 ((USB_OTG_INEndpointTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_IN_ENDPOINT_BASE))
+#define USB_OTG_FS_DOEP0 ((USB_OTG_OUTEndpointTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_OUT_ENDPOINT_BASE))
 #define USB_OTG_FS_HC0 ((USB_OTG_HostChannelTypeDef *)(USB_OTG_FS_PERIPH_BASE + USB_OTG_HOST_CHANNEL_BASE))
+
+#define USB_DEV_EPS 4
 
 void USB_host_channel_halt(uint8_t chan, uint8_t flush_requests);
 
@@ -163,6 +166,69 @@ void USB_handle_host()
     }
 }
 
+void USB_recv_setup()
+{
+    USB_OTG_FS_DOEP0->DOEPTSIZ = USB_OTG_DOEPTSIZ_STUPCNT; // receive 3 setup packets and clear the reg
+    USB_OTG_FS_DOEP0->DOEPTSIZ |= 24; // size of 3 setup packets
+    USB_OTG_FS_DOEP0->DOEPTSIZ |= USB_OTG_DOEPTSIZ_PKTCNT;
+    USB_OTG_FS_DOEP0->DOEPCTL |= USB_OTG_DOEPCTL_EPENA; // enable ep
+}
+
+void USB_handle_reset()
+{
+    usb_debug_write("USBRST", 1);
+    for (int i = 0; i < USB_DEV_EPS; i++)
+    {
+        USB_OTG_FS_DOEP0[i].DOEPCTL |= USB_OTG_DOEPCTL_SNAK; // set the nak bit for all out eps
+    }
+
+    USB_OTG_FS_DEVICE->DAINTMSK = 1; // unmask in ep 0 ints (and clear the reg)
+    USB_OTG_FS_DEVICE->DAINTMSK |= 1 << USB_OTG_DAINTMSK_OEPM_Pos; // unmask out ep 0 ints
+    USB_OTG_FS_DEVICE->DOEPMSK = USB_OTG_DOEPMSK_STUPM; // unmask setup done int (and clear the reg)
+    USB_OTG_FS_DEVICE->DOEPMSK |= USB_OTG_DOEPMSK_XFRCM; // transfer completed
+    USB_OTG_FS_DEVICE->DIEPMSK = USB_OTG_DIEPMSK_XFRCM; // unmask transfer completed int (and clear the reg)
+    USB_OTG_FS_DEVICE->DIEPMSK |= USB_OTG_DIEPMSK_TOM; // timeout condition
+
+    USB_recv_setup();
+
+    USB_OTG_FS->GINTSTS |= USB_OTG_GINTSTS_USBRST; // clear int
+}
+
+void USB_handle_otg()
+{
+    usb_debug_write("OTGINT-", 1);
+    if (USB_OTG_FS->GOTGINT & USB_OTG_GOTGINT_DBCDNE)
+    {
+        usb_debug_write("DBCDNE", 1);
+        USB_OTG_FS->GOTGINT |= USB_OTG_GOTGINT_DBCDNE;
+    }
+    if (USB_OTG_FS->GOTGINT & USB_OTG_GOTGINT_ADTOCHG)
+    {
+        usb_debug_write("ADTOCHG", 1);
+        USB_OTG_FS->GOTGINT |= USB_OTG_GOTGINT_ADTOCHG;
+    }
+    if (USB_OTG_FS->GOTGINT & USB_OTG_GOTGINT_HNGDET)
+    {
+        usb_debug_write("HNGDET", 1);
+        USB_OTG_FS->GOTGINT |= USB_OTG_GOTGINT_HNGDET;
+    }
+    if (USB_OTG_FS->GOTGINT & USB_OTG_GOTGINT_HNSSCHG)
+    {
+        usb_debug_write("HNSSCHG", 1);
+        USB_OTG_FS->GOTGINT |= USB_OTG_GOTGINT_HNSSCHG;
+    }
+    if (USB_OTG_FS->GOTGINT & USB_OTG_GOTGINT_SRSSCHG)
+    {
+        usb_debug_write("SRSSCHG", 1);
+        USB_OTG_FS->GOTGINT |= USB_OTG_GOTGINT_SRSSCHG;
+    }
+    if (USB_OTG_FS->GOTGINT & USB_OTG_GOTGINT_SEDET)
+    {
+        usb_debug_write("SEDET", 1);
+        USB_OTG_FS->GOTGINT |= USB_OTG_GOTGINT_SEDET;
+    }
+}
+
 void OTG_FS_IRQHandler(void)
 {
     io_set(LED_IN_1, io_get(LED_IN_1) ? 0 : 1);
@@ -182,7 +248,7 @@ void OTG_FS_IRQHandler(void)
     }
     if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_OTGINT)
     {
-        usb_debug_write("OTGINT", 1);
+        USB_handle_otg();
     }
     if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_MMIS)
     {
@@ -191,6 +257,20 @@ void OTG_FS_IRQHandler(void)
     if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_HCINT)
     {
         USB_handle_host();
+    }
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_USBRST)
+    {
+        USB_handle_reset();
+    }
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_ENUMDNE)
+    {
+        usb_debug_write("ENUMDNE", 1);
+        USB_OTG_FS->GINTSTS |= USB_OTG_GINTSTS_ENUMDNE; // clear int
+    }
+    if (USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_SRQINT)
+    {
+        usb_debug_write("SRQINT", 1);
+        USB_OTG_FS->GINTSTS |= USB_OTG_GINTSTS_SRQINT; // clear int
     }
 }
 
@@ -211,14 +291,15 @@ void USB_core_init()
     USB_OTG_FS->GAHBCFG &= ~USB_OTG_GAHBCFG_PTXFELVL; // gen int @ half-fill level
     USB_OTG_FS->GAHBCFG &= ~USB_OTG_GAHBCFG_TXFELVL; // gen int @ half-fill level
 
-    // USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_HNPCAP; // hnp on
-    // USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_SRPCAP; // srp on
+    USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_HNPCAP; // hnp on
+    USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_SRPCAP; // srp on
     USB_OTG_FS->GUSBCFG &= ~USB_OTG_GUSBCFG_TRDT;
     USB_OTG_FS->GUSBCFG |= calc_trdt(); // turnaround time
     USB_OTG_FS->GUSBCFG |= 2; // timeout calibration (didn't test, think 2 is neat)
 
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_OTGINT; // unmask OTG int
     USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_MMISM; // unmask mode mismatch int
+    USB_OTG_FS->GINTMSK |= USB_OTG_GINTMSK_SRQIM; // unmask srq int
 
     usb_mode = USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_CMOD; // read what mode are we in
 }
@@ -244,16 +325,12 @@ void USB_host_init(const uint16_t rx_fifo_size, const uint16_t np_tx_fifo_size, 
     USB_OTG_FS->HPTXFSIZ = p_tx_fifo_size << USB_OTG_HPTXFSIZ_PTXFD_Pos | p_tx_ram_start;
 }
 
-typedef enum
+// sizes min 16, max 256, in terms of 32-bit words
+void USB_device_init(const uint16_t rx_fifo_size)
 {
-    Max64B = 0,
-    Max32B,
-    Max16B,
-    Max8B,
-} UBS_FS_DEVICE_MPSIZ;
+    USB_OTG_FS->GUSBCFG |= USB_OTG_GUSBCFG_FDMOD; // force device
+    delay_ms(26); // wait at least 25 millis
 
-void USB_device_init(const UBS_FS_DEVICE_MPSIZ max_packet_size)
-{
     USB_OTG_FS_DEVICE->DCFG |= USB_OTG_DCFG_DSPD; // full speed
     USB_OTG_FS_DEVICE->DCFG &= ~USB_OTG_DCFG_NZLSOHSK; // todo: potentially make a parameter
     // see the datasheet for more info
@@ -266,15 +343,10 @@ void USB_device_init(const UBS_FS_DEVICE_MPSIZ max_packet_size)
 
     USB_OTG_FS->GCCFG |= USB_OTG_GCCFG_VBUSBSEN; // enable Vbus sensing in b device mode
 
-    while (!(USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_USBRST)){} // wait for reset
-    USB_OTG_FS->GINTSTS |= USB_OTG_GINTSTS_USBRST; // clear interrupt
+    USB_OTG_FS->GRXFSIZ = rx_fifo_size;
+    USB_OTG_FS->DIEPTXF0_HNPTXFSIZ = 16 << USB_OTG_NPTXFD_Pos | rx_fifo_size;
 
-    while (!(USB_OTG_FS->GINTSTS & USB_OTG_GINTSTS_ENUMDNE)){} // wait for enumeration to finish
-    if ((USB_OTG_FS_DEVICE->DSTS & USB_OTG_DSTS_ENUMSPD) != USB_OTG_DSTS_ENUMSPD) // read enumeration speed
-    {
-        return; // should never happen
-    }
-    USB_OTG_FS_IEP0->DIEPCTL |= max_packet_size; // set maximum packet size
+    USB_OTG_FS->GOTGCTL |= USB_OTG_GOTGCTL_SRQ; // send srq
 }
 
 typedef enum
@@ -470,7 +542,10 @@ void USB_phy_init()
     pin_setup_af(USB_DPLUS, PIN_MODE_AF, PIN_PULL_NONE, PIN_SPEED_VERYHIGH, PIN_TYPE_PUSHPULL, PIN_AF10);
 
     RCC->AHB2ENR |= RCC_AHB2ENR_OTGFSEN;
+}
 
+void USB_pwr_init()
+{
     pin_setup(USB_PWON, PIN_MODE_OUTPUT, PIN_PULL_NONE, PIN_SPEED_HIGH, PIN_TYPE_PUSHPULL);
     io_set(USB_PWON, 1); // reset
     delay_ms(200);
